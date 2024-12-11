@@ -4,6 +4,7 @@
 ![CI](https://github.com/test-results-reporter/publish/actions/workflows/ci.yml/badge.svg)
 [![Check dist/](https://github.com/test-results-reporter/publish/actions/workflows/check-dist.yml/badge.svg)](https://github.com/test-results-reporter/publish/actions/workflows/check-dist.yml)
 [![CodeQL](https://github.com/test-results-reporter/publish/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/test-results-reporter/publish/actions/workflows/codeql-analysis.yml)
+[![Coverage](./badges/coverage.svg)]
 
 GitHub Action for testbeats publish command
 
