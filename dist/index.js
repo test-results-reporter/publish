@@ -3186,6 +3186,15173 @@ function copyFile(srcFile, destFile, force) {
 
 /***/ }),
 
+/***/ 5195:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// Packages
+var retrier = __nccwpck_require__(5546);
+
+function retry(fn, opts) {
+  function run(resolve, reject) {
+    var options = opts || {};
+    var op;
+
+    // Default `randomize` to true
+    if (!('randomize' in options)) {
+      options.randomize = true;
+    }
+
+    op = retrier.operation(options);
+
+    // We allow the user to abort retrying
+    // this makes sense in the cases where
+    // knowledge is obtained that retrying
+    // would be futile (e.g.: auth errors)
+
+    function bail(err) {
+      reject(err || new Error('Aborted'));
+    }
+
+    function onError(err, num) {
+      if (err.bail) {
+        bail(err);
+        return;
+      }
+
+      if (!op.retry(err)) {
+        reject(op.mainError());
+      } else if (options.onRetry) {
+        options.onRetry(err, num);
+      }
+    }
+
+    function runAttempt(num) {
+      var val;
+
+      try {
+        val = fn(bail, num);
+      } catch (err) {
+        onError(err, num);
+        return;
+      }
+
+      Promise.resolve(val)
+        .then(resolve)
+        .catch(function catchIt(err) {
+          onError(err, num);
+        });
+    }
+
+    op.attempt(runAttempt);
+  }
+
+  return new Promise(run);
+}
+
+module.exports = retry;
+
+
+/***/ }),
+
+/***/ 1324:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+module.exports =
+{
+  parallel      : __nccwpck_require__(3857),
+  serial        : __nccwpck_require__(1054),
+  serialOrdered : __nccwpck_require__(3961)
+};
+
+
+/***/ }),
+
+/***/ 4818:
+/***/ ((module) => {
+
+// API
+module.exports = abort;
+
+/**
+ * Aborts leftover active jobs
+ *
+ * @param {object} state - current state object
+ */
+function abort(state)
+{
+  Object.keys(state.jobs).forEach(clean.bind(state));
+
+  // reset leftover jobs
+  state.jobs = {};
+}
+
+/**
+ * Cleans up leftover job by invoking abort function for the provided job id
+ *
+ * @this  state
+ * @param {string|number} key - job id to abort
+ */
+function clean(key)
+{
+  if (typeof this.jobs[key] == 'function')
+  {
+    this.jobs[key]();
+  }
+}
+
+
+/***/ }),
+
+/***/ 8452:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var defer = __nccwpck_require__(9200);
+
+// API
+module.exports = async;
+
+/**
+ * Runs provided callback asynchronously
+ * even if callback itself is not
+ *
+ * @param   {function} callback - callback to invoke
+ * @returns {function} - augmented callback
+ */
+function async(callback)
+{
+  var isAsync = false;
+
+  // check if async happened
+  defer(function() { isAsync = true; });
+
+  return function async_callback(err, result)
+  {
+    if (isAsync)
+    {
+      callback(err, result);
+    }
+    else
+    {
+      defer(function nextTick_callback()
+      {
+        callback(err, result);
+      });
+    }
+  };
+}
+
+
+/***/ }),
+
+/***/ 9200:
+/***/ ((module) => {
+
+module.exports = defer;
+
+/**
+ * Runs provided function on next iteration of the event loop
+ *
+ * @param {function} fn - function to run
+ */
+function defer(fn)
+{
+  var nextTick = typeof setImmediate == 'function'
+    ? setImmediate
+    : (
+      typeof process == 'object' && typeof process.nextTick == 'function'
+      ? process.nextTick
+      : null
+    );
+
+  if (nextTick)
+  {
+    nextTick(fn);
+  }
+  else
+  {
+    setTimeout(fn, 0);
+  }
+}
+
+
+/***/ }),
+
+/***/ 4902:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var async = __nccwpck_require__(8452)
+  , abort = __nccwpck_require__(4818)
+  ;
+
+// API
+module.exports = iterate;
+
+/**
+ * Iterates over each job object
+ *
+ * @param {array|object} list - array or object (named list) to iterate over
+ * @param {function} iterator - iterator to run
+ * @param {object} state - current job status
+ * @param {function} callback - invoked when all elements processed
+ */
+function iterate(list, iterator, state, callback)
+{
+  // store current index
+  var key = state['keyedList'] ? state['keyedList'][state.index] : state.index;
+
+  state.jobs[key] = runJob(iterator, key, list[key], function(error, output)
+  {
+    // don't repeat yourself
+    // skip secondary callbacks
+    if (!(key in state.jobs))
+    {
+      return;
+    }
+
+    // clean up jobs
+    delete state.jobs[key];
+
+    if (error)
+    {
+      // don't process rest of the results
+      // stop still active jobs
+      // and reset the list
+      abort(state);
+    }
+    else
+    {
+      state.results[key] = output;
+    }
+
+    // return salvaged results
+    callback(error, state.results);
+  });
+}
+
+/**
+ * Runs iterator over provided job element
+ *
+ * @param   {function} iterator - iterator to invoke
+ * @param   {string|number} key - key/index of the element in the list of jobs
+ * @param   {mixed} item - job description
+ * @param   {function} callback - invoked after iterator is done with the job
+ * @returns {function|mixed} - job abort function or something else
+ */
+function runJob(iterator, key, item, callback)
+{
+  var aborter;
+
+  // allow shortcut if iterator expects only two arguments
+  if (iterator.length == 2)
+  {
+    aborter = iterator(item, async(callback));
+  }
+  // otherwise go with full three arguments
+  else
+  {
+    aborter = iterator(item, key, async(callback));
+  }
+
+  return aborter;
+}
+
+
+/***/ }),
+
+/***/ 1721:
+/***/ ((module) => {
+
+// API
+module.exports = state;
+
+/**
+ * Creates initial state object
+ * for iteration over list
+ *
+ * @param   {array|object} list - list to iterate over
+ * @param   {function|null} sortMethod - function to use for keys sort,
+ *                                     or `null` to keep them as is
+ * @returns {object} - initial state object
+ */
+function state(list, sortMethod)
+{
+  var isNamedList = !Array.isArray(list)
+    , initState =
+    {
+      index    : 0,
+      keyedList: isNamedList || sortMethod ? Object.keys(list) : null,
+      jobs     : {},
+      results  : isNamedList ? {} : [],
+      size     : isNamedList ? Object.keys(list).length : list.length
+    }
+    ;
+
+  if (sortMethod)
+  {
+    // sort array keys based on it's values
+    // sort object's keys just on own merit
+    initState.keyedList.sort(isNamedList ? sortMethod : function(a, b)
+    {
+      return sortMethod(list[a], list[b]);
+    });
+  }
+
+  return initState;
+}
+
+
+/***/ }),
+
+/***/ 3351:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var abort = __nccwpck_require__(4818)
+  , async = __nccwpck_require__(8452)
+  ;
+
+// API
+module.exports = terminator;
+
+/**
+ * Terminates jobs in the attached state context
+ *
+ * @this  AsyncKitState#
+ * @param {function} callback - final callback to invoke after termination
+ */
+function terminator(callback)
+{
+  if (!Object.keys(this.jobs).length)
+  {
+    return;
+  }
+
+  // fast forward iteration index
+  this.index = this.size;
+
+  // abort jobs
+  abort(this);
+
+  // send back results we have so far
+  async(callback)(null, this.results);
+}
+
+
+/***/ }),
+
+/***/ 3857:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var iterate    = __nccwpck_require__(4902)
+  , initState  = __nccwpck_require__(1721)
+  , terminator = __nccwpck_require__(3351)
+  ;
+
+// Public API
+module.exports = parallel;
+
+/**
+ * Runs iterator over provided array elements in parallel
+ *
+ * @param   {array|object} list - array or object (named list) to iterate over
+ * @param   {function} iterator - iterator to run
+ * @param   {function} callback - invoked when all elements processed
+ * @returns {function} - jobs terminator
+ */
+function parallel(list, iterator, callback)
+{
+  var state = initState(list);
+
+  while (state.index < (state['keyedList'] || list).length)
+  {
+    iterate(list, iterator, state, function(error, result)
+    {
+      if (error)
+      {
+        callback(error, result);
+        return;
+      }
+
+      // looks like it's the last one
+      if (Object.keys(state.jobs).length === 0)
+      {
+        callback(null, state.results);
+        return;
+      }
+    });
+
+    state.index++;
+  }
+
+  return terminator.bind(state, callback);
+}
+
+
+/***/ }),
+
+/***/ 1054:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var serialOrdered = __nccwpck_require__(3961);
+
+// Public API
+module.exports = serial;
+
+/**
+ * Runs iterator over provided array elements in series
+ *
+ * @param   {array|object} list - array or object (named list) to iterate over
+ * @param   {function} iterator - iterator to run
+ * @param   {function} callback - invoked when all elements processed
+ * @returns {function} - jobs terminator
+ */
+function serial(list, iterator, callback)
+{
+  return serialOrdered(list, iterator, null, callback);
+}
+
+
+/***/ }),
+
+/***/ 3961:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var iterate    = __nccwpck_require__(4902)
+  , initState  = __nccwpck_require__(1721)
+  , terminator = __nccwpck_require__(3351)
+  ;
+
+// Public API
+module.exports = serialOrdered;
+// sorting helpers
+module.exports.ascending  = ascending;
+module.exports.descending = descending;
+
+/**
+ * Runs iterator over provided sorted array elements in series
+ *
+ * @param   {array|object} list - array or object (named list) to iterate over
+ * @param   {function} iterator - iterator to run
+ * @param   {function} sortMethod - custom sort function
+ * @param   {function} callback - invoked when all elements processed
+ * @returns {function} - jobs terminator
+ */
+function serialOrdered(list, iterator, sortMethod, callback)
+{
+  var state = initState(list, sortMethod);
+
+  iterate(list, iterator, state, function iteratorHandler(error, result)
+  {
+    if (error)
+    {
+      callback(error, result);
+      return;
+    }
+
+    state.index++;
+
+    // are we there yet?
+    if (state.index < (state['keyedList'] || list).length)
+    {
+      iterate(list, iterator, state, iteratorHandler);
+      return;
+    }
+
+    // done here
+    callback(null, state.results);
+  });
+
+  return terminator.bind(state, callback);
+}
+
+/*
+ * -- Sort methods
+ */
+
+/**
+ * sort helper to sort array elements in ascending order
+ *
+ * @param   {mixed} a - an item to compare
+ * @param   {mixed} b - an item to compare
+ * @returns {number} - comparison result
+ */
+function ascending(a, b)
+{
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * sort helper to sort array elements in descending order
+ *
+ * @param   {mixed} a - an item to compare
+ * @param   {mixed} b - an item to compare
+ * @returns {number} - comparison result
+ */
+function descending(a, b)
+{
+  return -1 * ascending(a, b);
+}
+
+
+/***/ }),
+
+/***/ 3866:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const CentraRequest = __nccwpck_require__(5741)
+
+module.exports = (url, method) => {
+	return new CentraRequest(url, method)
+}
+
+
+/***/ }),
+
+/***/ 5741:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const path = __nccwpck_require__(6928)
+const http = __nccwpck_require__(8611)
+const https = __nccwpck_require__(5692)
+const followRedirects = __nccwpck_require__(1573)
+const qs = __nccwpck_require__(3480)
+const zlib = __nccwpck_require__(3106)
+const {URL} = __nccwpck_require__(7016)
+
+const CentraResponse = __nccwpck_require__(217)
+
+const supportedCompressions = ['gzip', 'deflate', 'br']
+
+const useRequest = (protocol, maxRedirects) => {
+	let httpr
+	let httpsr
+	if (maxRedirects <= 0) {
+		httpr = http.request
+		httpsr = https.request
+	}
+	else {
+		httpr = followRedirects.http.request
+		httpsr = followRedirects.https.request
+	}
+
+	if (protocol === 'http:') {
+		return httpr
+	}
+	else if (protocol === 'https:') {
+		return httpsr
+	}
+	else throw new Error('Bad URL protocol: ' + protocol)
+}
+
+module.exports = class CentraRequest {
+	constructor (url, method = 'GET') {
+		this.url = typeof url === 'string' ? new URL(url) : url
+		this.method = method
+		this.data = null
+		this.sendDataAs = null
+		this.reqHeaders = {}
+		this.streamEnabled = false
+		this.compressionEnabled = false
+		this.timeoutTime = null
+		this.coreOptions = {}
+		this.maxRedirects = 0
+
+		this.resOptions = {
+			'maxBuffer': 50 * 1000000 // 50 MB
+		}
+
+		return this
+	}
+
+	followRedirects(n) {
+		this.maxRedirects = n
+
+		return this
+	}
+
+	query (a1, a2) {
+		if (typeof a1 === 'object') {
+			Object.keys(a1).forEach((queryKey) => {
+				this.url.searchParams.append(queryKey, a1[queryKey])
+			})
+		}
+		else this.url.searchParams.append(a1, a2)
+
+		return this
+	}
+
+	path (relativePath) {
+		this.url.pathname = path.join(this.url.pathname, relativePath)
+
+		return this
+	}
+
+	body (data, sendAs) {
+		this.sendDataAs = typeof data === 'object' && !sendAs && !Buffer.isBuffer(data) ? 'json' : (sendAs ? sendAs.toLowerCase() : 'buffer')
+		this.data = this.sendDataAs === 'form' ? qs.stringify(data) : (this.sendDataAs === 'json' ? JSON.stringify(data) : data)
+
+		return this
+	}
+
+	header (a1, a2) {
+		if (typeof a1 === 'object') {
+			Object.keys(a1).forEach((headerName) => {
+				this.reqHeaders[headerName.toLowerCase()] = a1[headerName]
+			})
+		}
+		else this.reqHeaders[a1.toLowerCase()] = a2
+
+		return this
+	}
+
+	timeout (timeout) {
+		this.timeoutTime = timeout
+
+		return this
+	}
+
+	option (name, value) {
+		this.coreOptions[name] = value
+
+		return this
+	}
+
+	stream () {
+		this.streamEnabled = true
+
+		return this
+	}
+
+	compress () {
+		this.compressionEnabled = true
+
+		if (!this.reqHeaders['accept-encoding']) this.reqHeaders['accept-encoding'] = supportedCompressions.join(', ')
+
+		return this
+	}
+
+	send () {
+		return new Promise((resolve, reject) => {
+			if (this.data) {
+				if (!this.reqHeaders.hasOwnProperty('content-type')) {
+					if (this.sendDataAs === 'json') {
+						this.reqHeaders['content-type'] = 'application/json'
+					}
+					else if (this.sendDataAs === 'form') {
+						this.reqHeaders['content-type'] = 'application/x-www-form-urlencoded'
+					}
+				}
+
+				if (!this.reqHeaders.hasOwnProperty('content-length')) {
+					this.reqHeaders['content-length'] = Buffer.byteLength(this.data)
+				}
+			}
+
+			const options = Object.assign({
+				'protocol': this.url.protocol,
+				'host': this.url.hostname.replace('[', '').replace(']', ''),
+				'port': this.url.port,
+				'path': this.url.pathname + (this.url.search === null ? '' : this.url.search),
+				'method': this.method,
+				'headers': this.reqHeaders,
+				'maxRedirects': this.maxRedirects
+			}, this.coreOptions)
+
+			let req
+
+			const resHandler = (res) => {
+				let stream = res
+
+				if (this.compressionEnabled) {
+					if (res.headers['content-encoding'] === 'gzip') {
+						stream = res.pipe(zlib.createGunzip())
+					}
+					else if (res.headers['content-encoding'] === 'deflate') {
+						stream = res.pipe(zlib.createInflate())
+					}
+					else if (res.headers['content-encoding'] === 'br') {
+						stream = res.pipe(zlib.createBrotliDecompress())
+					}
+				}
+
+				let centraRes
+
+				if (this.streamEnabled) {
+					resolve(stream)
+				}
+				else {
+					centraRes = new CentraResponse(res, this.resOptions)
+
+					stream.on('error', (err) => {
+						reject(err)
+					})
+
+					stream.on('aborted', () => {
+						reject(new Error('Server aborted request'))
+					})
+
+					stream.on('data', (chunk) => {
+						centraRes._addChunk(chunk)
+
+						if (this.resOptions.maxBuffer !== null && centraRes.body.length > this.resOptions.maxBuffer) {
+							stream.destroy()
+
+							reject('Received a response which was longer than acceptable when buffering. (' + this.body.length + ' bytes)')
+						}
+					})
+
+					stream.on('end', () => {
+						resolve(centraRes)
+					})
+				}
+			}
+
+			const request = useRequest(this.url.protocol, this.maxRedirects)
+
+			req = request(options, resHandler)
+
+			if (this.timeoutTime) {
+				req.setTimeout(this.timeoutTime, () => {
+					req.abort()
+
+					if (!this.streamEnabled) {
+						reject(new Error('Timeout reached'))
+					}
+				})
+			}
+
+			req.on('error', (err) => {
+				reject(err)
+			})
+
+			if (this.data) req.write(this.data)
+
+			req.end()
+		})
+	}
+}
+
+
+/***/ }),
+
+/***/ 217:
+/***/ ((module) => {
+
+module.exports = class CentraResponse {
+	constructor (res, resOptions) {
+		this.coreRes = res
+		this.resOptions = resOptions
+
+		this.body = Buffer.alloc(0)
+
+		this.headers = res.headers
+		this.statusCode = res.statusCode
+	}
+
+	_addChunk (chunk) {
+		this.body = Buffer.concat([this.body, chunk])
+	}
+
+	async json () {
+		return this.statusCode === 204 ? null : JSON.parse(this.body)
+	}
+
+	async text () {
+		return this.body.toString()
+	}
+}
+
+
+/***/ }),
+
+/***/ 5630:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var util = __nccwpck_require__(9023);
+var Stream = (__nccwpck_require__(2203).Stream);
+var DelayedStream = __nccwpck_require__(2710);
+
+module.exports = CombinedStream;
+function CombinedStream() {
+  this.writable = false;
+  this.readable = true;
+  this.dataSize = 0;
+  this.maxDataSize = 2 * 1024 * 1024;
+  this.pauseStreams = true;
+
+  this._released = false;
+  this._streams = [];
+  this._currentStream = null;
+  this._insideLoop = false;
+  this._pendingNext = false;
+}
+util.inherits(CombinedStream, Stream);
+
+CombinedStream.create = function(options) {
+  var combinedStream = new this();
+
+  options = options || {};
+  for (var option in options) {
+    combinedStream[option] = options[option];
+  }
+
+  return combinedStream;
+};
+
+CombinedStream.isStreamLike = function(stream) {
+  return (typeof stream !== 'function')
+    && (typeof stream !== 'string')
+    && (typeof stream !== 'boolean')
+    && (typeof stream !== 'number')
+    && (!Buffer.isBuffer(stream));
+};
+
+CombinedStream.prototype.append = function(stream) {
+  var isStreamLike = CombinedStream.isStreamLike(stream);
+
+  if (isStreamLike) {
+    if (!(stream instanceof DelayedStream)) {
+      var newStream = DelayedStream.create(stream, {
+        maxDataSize: Infinity,
+        pauseStream: this.pauseStreams,
+      });
+      stream.on('data', this._checkDataSize.bind(this));
+      stream = newStream;
+    }
+
+    this._handleErrors(stream);
+
+    if (this.pauseStreams) {
+      stream.pause();
+    }
+  }
+
+  this._streams.push(stream);
+  return this;
+};
+
+CombinedStream.prototype.pipe = function(dest, options) {
+  Stream.prototype.pipe.call(this, dest, options);
+  this.resume();
+  return dest;
+};
+
+CombinedStream.prototype._getNext = function() {
+  this._currentStream = null;
+
+  if (this._insideLoop) {
+    this._pendingNext = true;
+    return; // defer call
+  }
+
+  this._insideLoop = true;
+  try {
+    do {
+      this._pendingNext = false;
+      this._realGetNext();
+    } while (this._pendingNext);
+  } finally {
+    this._insideLoop = false;
+  }
+};
+
+CombinedStream.prototype._realGetNext = function() {
+  var stream = this._streams.shift();
+
+
+  if (typeof stream == 'undefined') {
+    this.end();
+    return;
+  }
+
+  if (typeof stream !== 'function') {
+    this._pipeNext(stream);
+    return;
+  }
+
+  var getStream = stream;
+  getStream(function(stream) {
+    var isStreamLike = CombinedStream.isStreamLike(stream);
+    if (isStreamLike) {
+      stream.on('data', this._checkDataSize.bind(this));
+      this._handleErrors(stream);
+    }
+
+    this._pipeNext(stream);
+  }.bind(this));
+};
+
+CombinedStream.prototype._pipeNext = function(stream) {
+  this._currentStream = stream;
+
+  var isStreamLike = CombinedStream.isStreamLike(stream);
+  if (isStreamLike) {
+    stream.on('end', this._getNext.bind(this));
+    stream.pipe(this, {end: false});
+    return;
+  }
+
+  var value = stream;
+  this.write(value);
+  this._getNext();
+};
+
+CombinedStream.prototype._handleErrors = function(stream) {
+  var self = this;
+  stream.on('error', function(err) {
+    self._emitError(err);
+  });
+};
+
+CombinedStream.prototype.write = function(data) {
+  this.emit('data', data);
+};
+
+CombinedStream.prototype.pause = function() {
+  if (!this.pauseStreams) {
+    return;
+  }
+
+  if(this.pauseStreams && this._currentStream && typeof(this._currentStream.pause) == 'function') this._currentStream.pause();
+  this.emit('pause');
+};
+
+CombinedStream.prototype.resume = function() {
+  if (!this._released) {
+    this._released = true;
+    this.writable = true;
+    this._getNext();
+  }
+
+  if(this.pauseStreams && this._currentStream && typeof(this._currentStream.resume) == 'function') this._currentStream.resume();
+  this.emit('resume');
+};
+
+CombinedStream.prototype.end = function() {
+  this._reset();
+  this.emit('end');
+};
+
+CombinedStream.prototype.destroy = function() {
+  this._reset();
+  this.emit('close');
+};
+
+CombinedStream.prototype._reset = function() {
+  this.writable = false;
+  this._streams = [];
+  this._currentStream = null;
+};
+
+CombinedStream.prototype._checkDataSize = function() {
+  this._updateDataSize();
+  if (this.dataSize <= this.maxDataSize) {
+    return;
+  }
+
+  var message =
+    'DelayedStream#maxDataSize of ' + this.maxDataSize + ' bytes exceeded.';
+  this._emitError(new Error(message));
+};
+
+CombinedStream.prototype._updateDataSize = function() {
+  this.dataSize = 0;
+
+  var self = this;
+  this._streams.forEach(function(stream) {
+    if (!stream.dataSize) {
+      return;
+    }
+
+    self.dataSize += stream.dataSize;
+  });
+
+  if (this._currentStream && this._currentStream.dataSize) {
+    this.dataSize += this._currentStream.dataSize;
+  }
+};
+
+CombinedStream.prototype._emitError = function(err) {
+  this._reset();
+  this.emit('error', err);
+};
+
+
+/***/ }),
+
+/***/ 1090:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var app 		= __nccwpck_require__(6560);
+var stream 		= __nccwpck_require__(8655);
+app.stream 		= stream;
+module.exports 	= app;
+
+/***/ }),
+
+/***/ 6560:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var helper = __nccwpck_require__(207);
+module.exports = {
+    toObject        : toObject,
+    toArray         : toArray,
+    toColumnArray   : toColumnArray,
+    toSchemaObject  : toSchemaObject,
+    toCSV           : toCSV
+}
+
+
+function toColumnArray(data, opts){
+
+    opts = opts || { };
+
+    var delimiter   = (opts.delimiter || ',');
+    var quote       = helper.getQuoteChar(opts.quote);
+    var content     = data;
+    var headers     = null;
+
+    if(typeof(content) !== "string"){
+        throw new Error("Invalid input, input data should be a string");
+    }
+
+    content     = content.split(/[\n\r]+/ig);
+
+    if(typeof(opts.headers) === "string"){
+        headers = opts.headers.split(/[\n\r]+/ig);
+        headers = quote ?
+                helper.convertArray(headers.shift(), delimiter, quote) :
+                headers.shift().split(delimiter);
+    }else{
+        headers = quote ?
+                helper.convertArray(content.shift(), delimiter, quote) :
+                content.shift().split(delimiter);
+    }
+
+
+    var hashData    = { };
+
+    headers.forEach(function(item){
+        hashData[item] = [];
+    });
+
+    content.forEach(function(item){
+        if(item){
+            item = quote ?
+                  helper.convertArray(item, delimiter, quote) :
+                  item.split(delimiter);
+            item.forEach(function(val, index){
+                hashData[headers[index]].push(helper.removeQuote(val));
+            });
+        }
+    });
+
+    return hashData;
+}
+
+function toObject(data, opts){
+
+    opts = opts || { };
+
+    var delimiter   = (opts.delimiter || ',');
+    var quote       = helper.getQuoteChar(opts.quote);
+    var content     = data;
+    var headers     = null;
+
+    if(typeof(content) !== "string"){
+        throw new Error("Invalid input, input data should be a string");
+    }
+
+    content = content.split(/[\n\r]+/ig);
+
+    if(typeof(opts.headers) === "string"){
+        headers = opts.headers.split(/[\n\r]+/ig);
+        headers = quote ?
+                helper.convertArray(headers.shift(), delimiter, quote) :
+                headers.shift().split(delimiter);
+    }else{
+        headers = quote ?
+                helper.convertArray(content.shift(), delimiter, quote) :
+                content.shift().split(delimiter);
+    }
+
+    var hashData = [ ];
+    content.forEach(function(item){
+        if(item){
+          item = quote ?
+                helper.convertArray(item, delimiter, quote) :
+                item.split(delimiter);
+          var hashItem = { };
+          headers.forEach(function(headerItem, index){
+              hashItem[headerItem] = helper.removeQuote(item[index]);
+          });
+          hashData.push(hashItem);
+        }
+    });
+    return hashData;
+}
+
+function toSchemaObject(data, opts){
+
+    opts = opts || { };
+
+    var delimiter   = (opts.delimiter || ',');
+    var quote       = helper.getQuoteChar(opts.quote);
+    var content     = data;
+    var headers     = null;
+    if(typeof(content) !== "string"){
+        throw new Error("Invalid input, input should be a string");
+    }
+
+    content         = content.split(/[\n\r]+/ig);
+
+
+    if(typeof(opts.headers) === "string"){
+        headers = opts.headers.split(/[\n\r]+/ig);
+        headers = quote ?
+                helper.convertArray(headers.shift(), delimiter, quote) :
+                headers.shift().split(delimiter);
+    }else{
+        headers = quote ?
+                helper.convertArray(content.shift(), delimiter, quote) :
+                content.shift().split(delimiter);
+    }
+
+
+    var hashData    = [ ];
+
+    content.forEach(function(item){
+        if(item){
+          item = quote ?
+                helper.convertArray(item, delimiter, quote) :
+                item.split(delimiter);
+            var schemaObject = {};
+            item.forEach(function(val, index){
+                helper.addDataInSchema(headers[index], val, schemaObject , delimiter, quote);
+            });
+            hashData.push(schemaObject);
+        }
+    });
+
+    return hashData;
+}
+
+function toArray(data, opts){
+
+    opts = opts || { };
+
+    var delimiter   = (opts.delimiter || ',');
+    var quote       = helper.getQuoteChar(opts.quote);
+    var content     = data;
+
+    if(typeof(content) !== "string"){
+        throw new Error("Invalid input, input data should be a string");
+    }
+
+    content = content.split(/[\n\r]+/ig);
+    var arrayData = [ ];
+    content.forEach(function(item){
+        if(item){
+            item = quote ?
+                helper.convertArray(item, delimiter, quote) :
+                item.split(delimiter);
+
+            item = item.map(function(cItem){
+                return helper.removeQuote(cItem);
+            });
+            arrayData.push(item);
+        }
+    });
+    return arrayData;
+}
+
+function toCSV(data, opts){
+
+    opts                = (opts || { });
+    opts.delimiter      = (opts.delimiter || ',');
+    opts.wrap           = (opts.wrap || '');
+    opts.arrayDenote    = (opts.arrayDenote && String(opts.arrayDenote).trim() ? opts.arrayDenote : '[]');
+    opts.objectDenote   = (opts.objectDenote && String(opts.objectDenote).trim() ? opts.objectDenote : '.');
+    opts.detailedOutput = (typeof(opts.detailedOutput) !== "boolean" ? true : opts.detailedOutput);
+    opts.headers        = String(opts.headers).toLowerCase();
+    var csvJSON         = { };
+    var csvData         = "";
+
+    if(!opts.headers.match(/none|full|relative|key/)){
+      opts.headers = 'full';
+    }else{
+      opts.headers = opts.headers.match(/none|full|relative|key/)[0];
+    }
+
+    if(opts.wrap === true){
+        opts.wrap = '"';
+    }
+
+    if(typeof(data) === "string"){
+        data = JSON.parse(data);
+    }
+
+    helper.toCsv(data, csvJSON, "", 0, opts);
+
+    var headers = helper.getHeaders(opts.headers, csvJSON, opts);
+
+    if(headers){
+      if(opts.wrap){
+        headers = headers.map(function(item){
+          return opts.wrap + item + opts.wrap;
+        });
+      }
+      csvData = headers.join(opts.delimiter);
+    }
+
+    var bigArrayLen = helper.getLengthyItem(csvJSON);
+    var keys        = Object.keys(csvJSON);
+    var row         = [ ];
+
+    var replaceNewLinePattern = /\n|\r/g;
+    if(!opts.wrap){
+        replaceNewLinePattern = new RegExp('\n|\r|' + opts.delimiter, 'g');
+    }
+
+
+    for(var i = 0; i < bigArrayLen; i++){
+        row = [ ];
+        for(var j = 0; j < keys.length; j++){
+            if(csvJSON[keys[j]][i]){
+                csvJSON[keys[j]][i] = csvJSON[keys[j]][i].replace(replaceNewLinePattern, '\t');
+                if(opts.wrap){
+                    csvJSON[keys[j]][i] = opts.wrap + csvJSON[keys[j]][i] + opts.wrap;
+                }
+                row[row.length] = csvJSON[keys[j]][i];
+            }else{
+                row[row.length] = "";
+            }
+        }
+      csvData += '\n' + row.join(opts.delimiter);
+    }
+    return csvData;
+}
+
+
+/***/ }),
+
+/***/ 207:
+/***/ ((module) => {
+
+module.exports = {
+    getQuoteChar : getQuoteChar,
+    dataType : dataType,
+    toCsv : toCsv,
+    putData : putData,
+    allObjsOrArray : allObjsOrArray,
+    getHeaders : getHeaders,
+    getLengthyItem : getLengthyItem,
+    addDataInSchema : addDataInSchema,
+    removeQuote : removeQuote,
+    arrayToCsv : arrayToCsv,
+    objectToCsv : objectToCsv,
+    convertArray : convertArray,
+    csvToArray : csvToArray
+}
+
+function getQuoteChar(q){
+  if(typeof(q) === "string"){
+    return q;
+  }else if(q === true){
+    return '"';
+  }
+  return null;
+}
+
+function dataType(arg) {
+    if (arg === null) {
+        return 'null';
+    }
+    else if (arg && (arg.nodeType === 1 || arg.nodeType === 9)) {
+        return 'element';
+    }
+    var type = (Object.prototype.toString.call(arg)).match(/\[object (.*?)\]/)[1].toLowerCase();
+    if (type === 'number') {
+        if (isNaN(arg)) {
+            return 'nan';
+        }
+        if (!isFinite(arg)) {
+            return 'infinity';
+        }
+    }
+    return type;
+}
+
+
+function toCsv(data, table, parent, row, opt){
+    if(dataType(data) === 'undefined'){
+        return putData('', table, parent, row, opt);
+    }else if(dataType(data) === 'null'){
+        return putData('null', table, parent, row, opt);
+    }else if(Array.isArray(data)){
+        return arrayToCsv(data, table, parent, row, opt);
+    }else if(typeof(data) === "object"){
+        return objectToCsv(data, table, parent, row, opt);
+    }else{
+        return putData(String(data), table, parent, row, opt);
+    }
+}
+
+function putData(data, table, parent, row, opt){
+  if(!table || !table[parent]){
+      table[parent] = [ ];
+  }
+  if(row < table[parent].length){
+    row = table[parent].length;
+  }
+  table[parent][row] = data;
+  return table;
+}
+
+
+function allObjsOrArray(array){
+  return array.every(function(item){
+        var datatype = dataType(item);
+        if(!datatype.match(/array|object/)){
+          return true;
+        }
+        return false;
+  });
+}
+
+
+function getHeaders(headerType, table, opt){
+  var keyMatchPattern       = /([^\[\]\.]+)$/;
+  var relativeMatchPattern  = /\[\]\.?([^\[\]]+)$/;
+  switch(headerType){
+    case "none":
+      return null;
+    case "full":
+      return Object.keys(table);
+    case "key":
+      return Object.keys(table).map(function(header){
+        var head = header.match(keyMatchPattern);
+        if(head && head.length === 2){
+          return head[1];
+        }
+        return header;
+      });
+    case "relative":
+      return Object.keys(table).map(function(header){
+        var head = header.match(relativeMatchPattern);
+        if(head && head.length === 2){
+          return head[1];
+        }
+        return header;
+      });
+  }
+}
+
+function getLengthyItem(table){
+  var len = 0;
+  Object.keys(table).forEach(function(item){
+      if(Array.isArray(table[item]) && table[item].length > len){
+        len = table[item].length;
+      }
+  });
+  return len;
+}
+
+function addDataInSchema(header, item, schema, delimiter, quote){
+    var match = header.match(/\[*[\d]\]\.(\w+)|\.|\[\]|\[(.)\]|-|\+/ig);
+    var headerName, currentPoint;
+    if(match){
+        var testMatch = match[0];
+        if(match.indexOf('-') !== -1){
+            return true;
+        }else if(match.indexOf('.') !== -1){
+            var headParts = header.split('.');
+            currentPoint = headParts.shift();
+            schema[currentPoint] = schema[currentPoint] || {};
+            addDataInSchema(headParts.join('.'), item, schema[currentPoint], delimiter, quote);
+        }else if(match.indexOf('[]') !== -1){
+            headerName = header.replace(/\[\]/ig,'');
+            if(!schema[headerName]){
+            schema[headerName] = [];
+            }
+            schema[headerName].push(item);
+        }else if(/\[*[\d]\]\.(\w+)/.test(testMatch)){
+            headerName = header.split('[').shift();
+            var index = parseInt(testMatch.match(/\[(.)\]/).pop(),10);
+            currentPoint = header.split('.').pop();
+            schema[headerName] = schema[headerName] || [];
+            schema[headerName][index] = schema[headerName][index] || {};
+            schema[headerName][index][currentPoint] = item;
+        }else if(/\[(.)\]/.test(testMatch)){
+            var delimiter = testMatch.match(/\[(.)\]/).pop();
+            headerName = header.replace(/\[(.)\]/ig,'');
+            schema[headerName] = convertArray(item, delimiter, quote);
+        }else if(match.indexOf('+') !== -1){
+            headerName = header.replace(/\+/ig,"");
+            schema[headerName] = Number(item);
+        }
+    }else{
+        schema[header] = removeQuote(item);
+    }
+    return schema ;
+}
+
+function removeQuote(str){
+    if(str){
+        return String(str).trim().replace(/^["|'](.*)["|']$/, '$1');
+    }
+    return "";
+}
+
+function arrayToCsv(data, table, parent, row, opt){
+    if(allObjsOrArray(data)){
+      return putData(data.join(';'), table, parent + opt.arrayDenote, row, opt);
+    }
+    data.forEach(function(item, index){
+        return toCsv(item, table, parent + opt.arrayDenote, index, opt);
+    });
+}
+
+function objectToCsv(data, table, parent, row, opt){
+  Object.keys(data).forEach(function(item){
+      return toCsv(data[item], table, parent + opt.objectDenote + item, row, opt);
+  });
+}
+
+function convertArray(str, delimiter, quote) {
+    if(quote && str.indexOf(quote) !== -1){
+      return csvToArray(str, delimiter, quote);
+    }
+    var output = [];
+    var arr = str.split(delimiter);
+    arr.forEach(function(val) {
+        var trimmed = val.trim();
+        output.push(trimmed);
+    });
+    return output;
+}
+
+function csvToArray(text, delimit, quote) {
+
+    delimit = delimit || ",";
+    quote   = quote || '"';
+
+    var value = new RegExp("(?!\\s*$)\\s*(?:" +  quote + "([^" +  quote + "\\\\]*(?:\\\\[\\S\\s][^" +  quote + "\\\\]*)*)" +  quote + "|([^" +  delimit  +  quote + "\\s\\\\]*(?:\\s+[^" +  delimit  +  quote + "\\s\\\\]+)*))\\s*(?:" +  delimit + "|$)", "g");
+
+    var a = [ ];
+
+    text.replace(value,
+        function(m0, m1, m2) {
+            if(m1 !== undefined){
+                a.push(m1.replace(/\\'/g, "'"));
+            }else if(m2 !== undefined){
+                a.push(m2);
+            }
+            return '';
+        }
+    );
+
+    if (/,\s*$/.test(text)){
+        a.push('');
+    }
+    return a;
+}
+
+
+/***/ }),
+
+/***/ 8655:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var app = __nccwpck_require__(6560);
+
+module.exports = {
+	toColumnArray: toColumnArray,
+	toObject: toObject,
+	toSchemaObject: toSchemaObject,
+	toArray: toArray,
+	transform: transform,
+	stringify: stringify
+}
+
+function chopLines(str) {
+	return str.split(/[\n\r]/ig);
+}
+
+function transform(func) {
+	var stream = __nccwpck_require__(2203);
+	return new stream.Transform({
+		readableObjectMode: true,
+		writableObjectMode: true,
+		transform: func
+	});
+}
+
+function stringify(space) {
+	return transform(function (data, encoding, callback) {
+		this.push(JSON.stringify(data, null, space))
+		callback()
+	});
+}
+
+function _toColumnArray(data, encoding, callback, trans) {
+	var lines = chopLines(data.toString());
+	if (!trans._head) {
+		var head = lines.shift();
+		trans._head = head;
+		trans._opts.headers = head;
+	}
+	this.push(app.toColumnArray(lines.join('\n'), trans._opts))
+	callback()
+}
+
+function toColumnArray(opts) {
+	opts = opts || {};
+	var trans = transform(function (data, encoding, callback) {
+		_toColumnArray.call(this, data, encoding, callback, trans);
+	});
+	trans._head = opts.headers ? opts.headers : null;
+	trans._opts = opts;
+	return trans;
+}
+
+function _toObject(data, encoding, callback, trans) {
+	var lines = chopLines(data.toString());
+	if (!trans._head) {
+		var head = lines.shift();
+		trans._head = head;
+		trans._opts.headers = head;
+	}
+	this.push(app.toObject(lines.join('\n'), trans._opts))
+	callback()
+}
+
+function toObject(opts) {
+	opts = opts || {};
+	var trans = transform(function (data, encoding, callback) {
+		_toObject.call(this, data, encoding, callback, trans);
+	});
+	trans._head = opts.headers ? opts.headers : null;
+	trans._opts = opts;
+	return trans;
+}
+
+function _toSchemaObject(data, encoding, callback, trans) {
+	var lines = chopLines(data.toString());
+	if (!trans._head) {
+		var head = lines.shift();
+		trans._head = head;
+		trans._opts.headers = head;
+	}
+	this.push(app.toSchemaObject(lines.join('\n'), trans._opts))
+	callback()
+}
+
+function toSchemaObject(opts) {
+	opts = opts || {};
+	var trans = transform(function (data, encoding, callback) {
+		_toSchemaObject.call(this, data, encoding, callback, trans);
+	});
+	trans._head = opts.headers ? opts.headers : null;
+	trans._opts = opts;
+	return trans;
+}
+
+function _toArray(data, encoding, callback, trans) {
+	var lines = chopLines(data.toString());
+	this.push(app.toArray(lines.join('\n'), trans._opts))
+	callback()
+}
+
+function toArray(opts) {
+	opts = opts || {};
+	var trans = transform(function (data, encoding, callback) {
+		_toArray.call(this, data, encoding, callback, trans);
+	});
+	trans._opts = opts;
+	return trans;
+}
+
+/***/ }),
+
+/***/ 6110:
+/***/ ((module, exports, __nccwpck_require__) => {
+
+/* eslint-env browser */
+
+/**
+ * This is the web browser implementation of `debug()`.
+ */
+
+exports.formatArgs = formatArgs;
+exports.save = save;
+exports.load = load;
+exports.useColors = useColors;
+exports.storage = localstorage();
+exports.destroy = (() => {
+	let warned = false;
+
+	return () => {
+		if (!warned) {
+			warned = true;
+			console.warn('Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.');
+		}
+	};
+})();
+
+/**
+ * Colors.
+ */
+
+exports.colors = [
+	'#0000CC',
+	'#0000FF',
+	'#0033CC',
+	'#0033FF',
+	'#0066CC',
+	'#0066FF',
+	'#0099CC',
+	'#0099FF',
+	'#00CC00',
+	'#00CC33',
+	'#00CC66',
+	'#00CC99',
+	'#00CCCC',
+	'#00CCFF',
+	'#3300CC',
+	'#3300FF',
+	'#3333CC',
+	'#3333FF',
+	'#3366CC',
+	'#3366FF',
+	'#3399CC',
+	'#3399FF',
+	'#33CC00',
+	'#33CC33',
+	'#33CC66',
+	'#33CC99',
+	'#33CCCC',
+	'#33CCFF',
+	'#6600CC',
+	'#6600FF',
+	'#6633CC',
+	'#6633FF',
+	'#66CC00',
+	'#66CC33',
+	'#9900CC',
+	'#9900FF',
+	'#9933CC',
+	'#9933FF',
+	'#99CC00',
+	'#99CC33',
+	'#CC0000',
+	'#CC0033',
+	'#CC0066',
+	'#CC0099',
+	'#CC00CC',
+	'#CC00FF',
+	'#CC3300',
+	'#CC3333',
+	'#CC3366',
+	'#CC3399',
+	'#CC33CC',
+	'#CC33FF',
+	'#CC6600',
+	'#CC6633',
+	'#CC9900',
+	'#CC9933',
+	'#CCCC00',
+	'#CCCC33',
+	'#FF0000',
+	'#FF0033',
+	'#FF0066',
+	'#FF0099',
+	'#FF00CC',
+	'#FF00FF',
+	'#FF3300',
+	'#FF3333',
+	'#FF3366',
+	'#FF3399',
+	'#FF33CC',
+	'#FF33FF',
+	'#FF6600',
+	'#FF6633',
+	'#FF9900',
+	'#FF9933',
+	'#FFCC00',
+	'#FFCC33'
+];
+
+/**
+ * Currently only WebKit-based Web Inspectors, Firefox >= v31,
+ * and the Firebug extension (any Firefox version) are known
+ * to support "%c" CSS customizations.
+ *
+ * TODO: add a `localStorage` variable to explicitly enable/disable colors
+ */
+
+// eslint-disable-next-line complexity
+function useColors() {
+	// NB: In an Electron preload script, document will be defined but not fully
+	// initialized. Since we know we're in Chrome, we'll just detect this case
+	// explicitly
+	if (typeof window !== 'undefined' && window.process && (window.process.type === 'renderer' || window.process.__nwjs)) {
+		return true;
+	}
+
+	// Internet Explorer and Edge do not support colors.
+	if (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/(edge|trident)\/(\d+)/)) {
+		return false;
+	}
+
+	// Is webkit? http://stackoverflow.com/a/16459606/376773
+	// document is undefined in react-native: https://github.com/facebook/react-native/pull/1632
+	return (typeof document !== 'undefined' && document.documentElement && document.documentElement.style && document.documentElement.style.WebkitAppearance) ||
+		// Is firebug? http://stackoverflow.com/a/398120/376773
+		(typeof window !== 'undefined' && window.console && (window.console.firebug || (window.console.exception && window.console.table))) ||
+		// Is firefox >= v31?
+		// https://developer.mozilla.org/en-US/docs/Tools/Web_Console#Styling_messages
+		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/) && parseInt(RegExp.$1, 10) >= 31) ||
+		// Double check webkit in userAgent just in case we are in a worker
+		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/applewebkit\/(\d+)/));
+}
+
+/**
+ * Colorize log arguments if enabled.
+ *
+ * @api public
+ */
+
+function formatArgs(args) {
+	args[0] = (this.useColors ? '%c' : '') +
+		this.namespace +
+		(this.useColors ? ' %c' : ' ') +
+		args[0] +
+		(this.useColors ? '%c ' : ' ') +
+		'+' + module.exports.humanize(this.diff);
+
+	if (!this.useColors) {
+		return;
+	}
+
+	const c = 'color: ' + this.color;
+	args.splice(1, 0, c, 'color: inherit');
+
+	// The final "%c" is somewhat tricky, because there could be other
+	// arguments passed either before or after the %c, so we need to
+	// figure out the correct index to insert the CSS into
+	let index = 0;
+	let lastC = 0;
+	args[0].replace(/%[a-zA-Z%]/g, match => {
+		if (match === '%%') {
+			return;
+		}
+		index++;
+		if (match === '%c') {
+			// We only are interested in the *last* %c
+			// (the user may have provided their own)
+			lastC = index;
+		}
+	});
+
+	args.splice(lastC, 0, c);
+}
+
+/**
+ * Invokes `console.debug()` when available.
+ * No-op when `console.debug` is not a "function".
+ * If `console.debug` is not available, falls back
+ * to `console.log`.
+ *
+ * @api public
+ */
+exports.log = console.debug || console.log || (() => {});
+
+/**
+ * Save `namespaces`.
+ *
+ * @param {String} namespaces
+ * @api private
+ */
+function save(namespaces) {
+	try {
+		if (namespaces) {
+			exports.storage.setItem('debug', namespaces);
+		} else {
+			exports.storage.removeItem('debug');
+		}
+	} catch (error) {
+		// Swallow
+		// XXX (@Qix-) should we be logging these?
+	}
+}
+
+/**
+ * Load `namespaces`.
+ *
+ * @return {String} returns the previously persisted debug modes
+ * @api private
+ */
+function load() {
+	let r;
+	try {
+		r = exports.storage.getItem('debug');
+	} catch (error) {
+		// Swallow
+		// XXX (@Qix-) should we be logging these?
+	}
+
+	// If debug isn't set in LS, and we're in Electron, try to load $DEBUG
+	if (!r && typeof process !== 'undefined' && 'env' in process) {
+		r = process.env.DEBUG;
+	}
+
+	return r;
+}
+
+/**
+ * Localstorage attempts to return the localstorage.
+ *
+ * This is necessary because safari throws
+ * when a user disables cookies/localstorage
+ * and you attempt to access it.
+ *
+ * @return {LocalStorage}
+ * @api private
+ */
+
+function localstorage() {
+	try {
+		// TVMLKit (Apple TV JS Runtime) does not have a window object, just localStorage in the global context
+		// The Browser also has localStorage in the global context.
+		return localStorage;
+	} catch (error) {
+		// Swallow
+		// XXX (@Qix-) should we be logging these?
+	}
+}
+
+module.exports = __nccwpck_require__(897)(exports);
+
+const {formatters} = module.exports;
+
+/**
+ * Map %j to `JSON.stringify()`, since no Web Inspectors do that by default.
+ */
+
+formatters.j = function (v) {
+	try {
+		return JSON.stringify(v);
+	} catch (error) {
+		return '[UnexpectedJSONParseError]: ' + error.message;
+	}
+};
+
+
+/***/ }),
+
+/***/ 897:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+/**
+ * This is the common logic for both the Node.js and web browser
+ * implementations of `debug()`.
+ */
+
+function setup(env) {
+	createDebug.debug = createDebug;
+	createDebug.default = createDebug;
+	createDebug.coerce = coerce;
+	createDebug.disable = disable;
+	createDebug.enable = enable;
+	createDebug.enabled = enabled;
+	createDebug.humanize = __nccwpck_require__(744);
+	createDebug.destroy = destroy;
+
+	Object.keys(env).forEach(key => {
+		createDebug[key] = env[key];
+	});
+
+	/**
+	* The currently active debug mode names, and names to skip.
+	*/
+
+	createDebug.names = [];
+	createDebug.skips = [];
+
+	/**
+	* Map of special "%n" handling functions, for the debug "format" argument.
+	*
+	* Valid key names are a single, lower or upper-case letter, i.e. "n" and "N".
+	*/
+	createDebug.formatters = {};
+
+	/**
+	* Selects a color for a debug namespace
+	* @param {String} namespace The namespace string for the debug instance to be colored
+	* @return {Number|String} An ANSI color code for the given namespace
+	* @api private
+	*/
+	function selectColor(namespace) {
+		let hash = 0;
+
+		for (let i = 0; i < namespace.length; i++) {
+			hash = ((hash << 5) - hash) + namespace.charCodeAt(i);
+			hash |= 0; // Convert to 32bit integer
+		}
+
+		return createDebug.colors[Math.abs(hash) % createDebug.colors.length];
+	}
+	createDebug.selectColor = selectColor;
+
+	/**
+	* Create a debugger with the given `namespace`.
+	*
+	* @param {String} namespace
+	* @return {Function}
+	* @api public
+	*/
+	function createDebug(namespace) {
+		let prevTime;
+		let enableOverride = null;
+		let namespacesCache;
+		let enabledCache;
+
+		function debug(...args) {
+			// Disabled?
+			if (!debug.enabled) {
+				return;
+			}
+
+			const self = debug;
+
+			// Set `diff` timestamp
+			const curr = Number(new Date());
+			const ms = curr - (prevTime || curr);
+			self.diff = ms;
+			self.prev = prevTime;
+			self.curr = curr;
+			prevTime = curr;
+
+			args[0] = createDebug.coerce(args[0]);
+
+			if (typeof args[0] !== 'string') {
+				// Anything else let's inspect with %O
+				args.unshift('%O');
+			}
+
+			// Apply any `formatters` transformations
+			let index = 0;
+			args[0] = args[0].replace(/%([a-zA-Z%])/g, (match, format) => {
+				// If we encounter an escaped % then don't increase the array index
+				if (match === '%%') {
+					return '%';
+				}
+				index++;
+				const formatter = createDebug.formatters[format];
+				if (typeof formatter === 'function') {
+					const val = args[index];
+					match = formatter.call(self, val);
+
+					// Now we need to remove `args[index]` since it's inlined in the `format`
+					args.splice(index, 1);
+					index--;
+				}
+				return match;
+			});
+
+			// Apply env-specific formatting (colors, etc.)
+			createDebug.formatArgs.call(self, args);
+
+			const logFn = self.log || createDebug.log;
+			logFn.apply(self, args);
+		}
+
+		debug.namespace = namespace;
+		debug.useColors = createDebug.useColors();
+		debug.color = createDebug.selectColor(namespace);
+		debug.extend = extend;
+		debug.destroy = createDebug.destroy; // XXX Temporary. Will be removed in the next major release.
+
+		Object.defineProperty(debug, 'enabled', {
+			enumerable: true,
+			configurable: false,
+			get: () => {
+				if (enableOverride !== null) {
+					return enableOverride;
+				}
+				if (namespacesCache !== createDebug.namespaces) {
+					namespacesCache = createDebug.namespaces;
+					enabledCache = createDebug.enabled(namespace);
+				}
+
+				return enabledCache;
+			},
+			set: v => {
+				enableOverride = v;
+			}
+		});
+
+		// Env-specific initialization logic for debug instances
+		if (typeof createDebug.init === 'function') {
+			createDebug.init(debug);
+		}
+
+		return debug;
+	}
+
+	function extend(namespace, delimiter) {
+		const newDebug = createDebug(this.namespace + (typeof delimiter === 'undefined' ? ':' : delimiter) + namespace);
+		newDebug.log = this.log;
+		return newDebug;
+	}
+
+	/**
+	* Enables a debug mode by namespaces. This can include modes
+	* separated by a colon and wildcards.
+	*
+	* @param {String} namespaces
+	* @api public
+	*/
+	function enable(namespaces) {
+		createDebug.save(namespaces);
+		createDebug.namespaces = namespaces;
+
+		createDebug.names = [];
+		createDebug.skips = [];
+
+		let i;
+		const split = (typeof namespaces === 'string' ? namespaces : '').split(/[\s,]+/);
+		const len = split.length;
+
+		for (i = 0; i < len; i++) {
+			if (!split[i]) {
+				// ignore empty strings
+				continue;
+			}
+
+			namespaces = split[i].replace(/\*/g, '.*?');
+
+			if (namespaces[0] === '-') {
+				createDebug.skips.push(new RegExp('^' + namespaces.slice(1) + '$'));
+			} else {
+				createDebug.names.push(new RegExp('^' + namespaces + '$'));
+			}
+		}
+	}
+
+	/**
+	* Disable debug output.
+	*
+	* @return {String} namespaces
+	* @api public
+	*/
+	function disable() {
+		const namespaces = [
+			...createDebug.names.map(toNamespace),
+			...createDebug.skips.map(toNamespace).map(namespace => '-' + namespace)
+		].join(',');
+		createDebug.enable('');
+		return namespaces;
+	}
+
+	/**
+	* Returns true if the given mode name is enabled, false otherwise.
+	*
+	* @param {String} name
+	* @return {Boolean}
+	* @api public
+	*/
+	function enabled(name) {
+		if (name[name.length - 1] === '*') {
+			return true;
+		}
+
+		let i;
+		let len;
+
+		for (i = 0, len = createDebug.skips.length; i < len; i++) {
+			if (createDebug.skips[i].test(name)) {
+				return false;
+			}
+		}
+
+		for (i = 0, len = createDebug.names.length; i < len; i++) {
+			if (createDebug.names[i].test(name)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	* Convert regexp to namespace
+	*
+	* @param {RegExp} regxep
+	* @return {String} namespace
+	* @api private
+	*/
+	function toNamespace(regexp) {
+		return regexp.toString()
+			.substring(2, regexp.toString().length - 2)
+			.replace(/\.\*\?$/, '*');
+	}
+
+	/**
+	* Coerce `val`.
+	*
+	* @param {Mixed} val
+	* @return {Mixed}
+	* @api private
+	*/
+	function coerce(val) {
+		if (val instanceof Error) {
+			return val.stack || val.message;
+		}
+		return val;
+	}
+
+	/**
+	* XXX DO NOT USE. This is a temporary stub function.
+	* XXX It WILL be removed in the next major release.
+	*/
+	function destroy() {
+		console.warn('Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.');
+	}
+
+	createDebug.enable(createDebug.load());
+
+	return createDebug;
+}
+
+module.exports = setup;
+
+
+/***/ }),
+
+/***/ 2830:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+/**
+ * Detect Electron renderer / nwjs process, which is node, but we should
+ * treat as a browser.
+ */
+
+if (typeof process === 'undefined' || process.type === 'renderer' || process.browser === true || process.__nwjs) {
+	module.exports = __nccwpck_require__(6110);
+} else {
+	module.exports = __nccwpck_require__(5108);
+}
+
+
+/***/ }),
+
+/***/ 5108:
+/***/ ((module, exports, __nccwpck_require__) => {
+
+/**
+ * Module dependencies.
+ */
+
+const tty = __nccwpck_require__(2018);
+const util = __nccwpck_require__(9023);
+
+/**
+ * This is the Node.js implementation of `debug()`.
+ */
+
+exports.init = init;
+exports.log = log;
+exports.formatArgs = formatArgs;
+exports.save = save;
+exports.load = load;
+exports.useColors = useColors;
+exports.destroy = util.deprecate(
+	() => {},
+	'Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.'
+);
+
+/**
+ * Colors.
+ */
+
+exports.colors = [6, 2, 3, 4, 5, 1];
+
+try {
+	// Optional dependency (as in, doesn't need to be installed, NOT like optionalDependencies in package.json)
+	// eslint-disable-next-line import/no-extraneous-dependencies
+	const supportsColor = __nccwpck_require__(1450);
+
+	if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
+		exports.colors = [
+			20,
+			21,
+			26,
+			27,
+			32,
+			33,
+			38,
+			39,
+			40,
+			41,
+			42,
+			43,
+			44,
+			45,
+			56,
+			57,
+			62,
+			63,
+			68,
+			69,
+			74,
+			75,
+			76,
+			77,
+			78,
+			79,
+			80,
+			81,
+			92,
+			93,
+			98,
+			99,
+			112,
+			113,
+			128,
+			129,
+			134,
+			135,
+			148,
+			149,
+			160,
+			161,
+			162,
+			163,
+			164,
+			165,
+			166,
+			167,
+			168,
+			169,
+			170,
+			171,
+			172,
+			173,
+			178,
+			179,
+			184,
+			185,
+			196,
+			197,
+			198,
+			199,
+			200,
+			201,
+			202,
+			203,
+			204,
+			205,
+			206,
+			207,
+			208,
+			209,
+			214,
+			215,
+			220,
+			221
+		];
+	}
+} catch (error) {
+	// Swallow - we only care if `supports-color` is available; it doesn't have to be.
+}
+
+/**
+ * Build up the default `inspectOpts` object from the environment variables.
+ *
+ *   $ DEBUG_COLORS=no DEBUG_DEPTH=10 DEBUG_SHOW_HIDDEN=enabled node script.js
+ */
+
+exports.inspectOpts = Object.keys(process.env).filter(key => {
+	return /^debug_/i.test(key);
+}).reduce((obj, key) => {
+	// Camel-case
+	const prop = key
+		.substring(6)
+		.toLowerCase()
+		.replace(/_([a-z])/g, (_, k) => {
+			return k.toUpperCase();
+		});
+
+	// Coerce string value into JS value
+	let val = process.env[key];
+	if (/^(yes|on|true|enabled)$/i.test(val)) {
+		val = true;
+	} else if (/^(no|off|false|disabled)$/i.test(val)) {
+		val = false;
+	} else if (val === 'null') {
+		val = null;
+	} else {
+		val = Number(val);
+	}
+
+	obj[prop] = val;
+	return obj;
+}, {});
+
+/**
+ * Is stdout a TTY? Colored output is enabled when `true`.
+ */
+
+function useColors() {
+	return 'colors' in exports.inspectOpts ?
+		Boolean(exports.inspectOpts.colors) :
+		tty.isatty(process.stderr.fd);
+}
+
+/**
+ * Adds ANSI color escape codes if enabled.
+ *
+ * @api public
+ */
+
+function formatArgs(args) {
+	const {namespace: name, useColors} = this;
+
+	if (useColors) {
+		const c = this.color;
+		const colorCode = '\u001B[3' + (c < 8 ? c : '8;5;' + c);
+		const prefix = `  ${colorCode};1m${name} \u001B[0m`;
+
+		args[0] = prefix + args[0].split('\n').join('\n' + prefix);
+		args.push(colorCode + 'm+' + module.exports.humanize(this.diff) + '\u001B[0m');
+	} else {
+		args[0] = getDate() + name + ' ' + args[0];
+	}
+}
+
+function getDate() {
+	if (exports.inspectOpts.hideDate) {
+		return '';
+	}
+	return new Date().toISOString() + ' ';
+}
+
+/**
+ * Invokes `util.format()` with the specified arguments and writes to stderr.
+ */
+
+function log(...args) {
+	return process.stderr.write(util.format(...args) + '\n');
+}
+
+/**
+ * Save `namespaces`.
+ *
+ * @param {String} namespaces
+ * @api private
+ */
+function save(namespaces) {
+	if (namespaces) {
+		process.env.DEBUG = namespaces;
+	} else {
+		// If you set a process.env field to null or undefined, it gets cast to the
+		// string 'null' or 'undefined'. Just delete instead.
+		delete process.env.DEBUG;
+	}
+}
+
+/**
+ * Load `namespaces`.
+ *
+ * @return {String} returns the previously persisted debug modes
+ * @api private
+ */
+
+function load() {
+	return process.env.DEBUG;
+}
+
+/**
+ * Init logic for `debug` instances.
+ *
+ * Create a new `inspectOpts` object in case `useColors` is set
+ * differently for a particular `debug` instance.
+ */
+
+function init(debug) {
+	debug.inspectOpts = {};
+
+	const keys = Object.keys(exports.inspectOpts);
+	for (let i = 0; i < keys.length; i++) {
+		debug.inspectOpts[keys[i]] = exports.inspectOpts[keys[i]];
+	}
+}
+
+module.exports = __nccwpck_require__(897)(exports);
+
+const {formatters} = module.exports;
+
+/**
+ * Map %o to `util.inspect()`, all on a single line.
+ */
+
+formatters.o = function (v) {
+	this.inspectOpts.colors = this.useColors;
+	return util.inspect(v, this.inspectOpts)
+		.split('\n')
+		.map(str => str.trim())
+		.join(' ');
+};
+
+/**
+ * Map %O to `util.inspect()`, allowing multiple lines if needed.
+ */
+
+formatters.O = function (v) {
+	this.inspectOpts.colors = this.useColors;
+	return util.inspect(v, this.inspectOpts);
+};
+
+
+/***/ }),
+
+/***/ 2710:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var Stream = (__nccwpck_require__(2203).Stream);
+var util = __nccwpck_require__(9023);
+
+module.exports = DelayedStream;
+function DelayedStream() {
+  this.source = null;
+  this.dataSize = 0;
+  this.maxDataSize = 1024 * 1024;
+  this.pauseStream = true;
+
+  this._maxDataSizeExceeded = false;
+  this._released = false;
+  this._bufferedEvents = [];
+}
+util.inherits(DelayedStream, Stream);
+
+DelayedStream.create = function(source, options) {
+  var delayedStream = new this();
+
+  options = options || {};
+  for (var option in options) {
+    delayedStream[option] = options[option];
+  }
+
+  delayedStream.source = source;
+
+  var realEmit = source.emit;
+  source.emit = function() {
+    delayedStream._handleEmit(arguments);
+    return realEmit.apply(source, arguments);
+  };
+
+  source.on('error', function() {});
+  if (delayedStream.pauseStream) {
+    source.pause();
+  }
+
+  return delayedStream;
+};
+
+Object.defineProperty(DelayedStream.prototype, 'readable', {
+  configurable: true,
+  enumerable: true,
+  get: function() {
+    return this.source.readable;
+  }
+});
+
+DelayedStream.prototype.setEncoding = function() {
+  return this.source.setEncoding.apply(this.source, arguments);
+};
+
+DelayedStream.prototype.resume = function() {
+  if (!this._released) {
+    this.release();
+  }
+
+  this.source.resume();
+};
+
+DelayedStream.prototype.pause = function() {
+  this.source.pause();
+};
+
+DelayedStream.prototype.release = function() {
+  this._released = true;
+
+  this._bufferedEvents.forEach(function(args) {
+    this.emit.apply(this, args);
+  }.bind(this));
+  this._bufferedEvents = [];
+};
+
+DelayedStream.prototype.pipe = function() {
+  var r = Stream.prototype.pipe.apply(this, arguments);
+  this.resume();
+  return r;
+};
+
+DelayedStream.prototype._handleEmit = function(args) {
+  if (this._released) {
+    this.emit.apply(this, args);
+    return;
+  }
+
+  if (args[0] === 'data') {
+    this.dataSize += args[1].length;
+    this._checkIfMaxDataSizeExceeded();
+  }
+
+  this._bufferedEvents.push(args);
+};
+
+DelayedStream.prototype._checkIfMaxDataSizeExceeded = function() {
+  if (this._maxDataSizeExceeded) {
+    return;
+  }
+
+  if (this.dataSize <= this.maxDataSize) {
+    return;
+  }
+
+  this._maxDataSizeExceeded = true;
+  var message =
+    'DelayedStream#maxDataSize of ' + this.maxDataSize + ' bytes exceeded.'
+  this.emit('error', new Error(message));
+};
+
+
+/***/ }),
+
+/***/ 9741:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const validator = __nccwpck_require__(9433);
+const XMLParser = __nccwpck_require__(9844);
+const XMLBuilder = __nccwpck_require__(659);
+
+module.exports = {
+  XMLParser: XMLParser,
+  XMLValidator: validator,
+  XMLBuilder: XMLBuilder
+}
+
+/***/ }),
+
+/***/ 812:
+/***/ ((module) => {
+
+function getIgnoreAttributesFn(ignoreAttributes) {
+    if (typeof ignoreAttributes === 'function') {
+        return ignoreAttributes
+    }
+    if (Array.isArray(ignoreAttributes)) {
+        return (attrName) => {
+            for (const pattern of ignoreAttributes) {
+                if (typeof pattern === 'string' && attrName === pattern) {
+                    return true
+                }
+                if (pattern instanceof RegExp && pattern.test(attrName)) {
+                    return true
+                }
+            }
+        }
+    }
+    return () => false
+}
+
+module.exports = getIgnoreAttributesFn
+
+/***/ }),
+
+/***/ 7019:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+const nameStartChar = ':A-Za-z_\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD';
+const nameChar = nameStartChar + '\\-.\\d\\u00B7\\u0300-\\u036F\\u203F-\\u2040';
+const nameRegexp = '[' + nameStartChar + '][' + nameChar + ']*'
+const regexName = new RegExp('^' + nameRegexp + '$');
+
+const getAllMatches = function(string, regex) {
+  const matches = [];
+  let match = regex.exec(string);
+  while (match) {
+    const allmatches = [];
+    allmatches.startIndex = regex.lastIndex - match[0].length;
+    const len = match.length;
+    for (let index = 0; index < len; index++) {
+      allmatches.push(match[index]);
+    }
+    matches.push(allmatches);
+    match = regex.exec(string);
+  }
+  return matches;
+};
+
+const isName = function(string) {
+  const match = regexName.exec(string);
+  return !(match === null || typeof match === 'undefined');
+};
+
+exports.isExist = function(v) {
+  return typeof v !== 'undefined';
+};
+
+exports.isEmptyObject = function(obj) {
+  return Object.keys(obj).length === 0;
+};
+
+/**
+ * Copy all the properties of a into b.
+ * @param {*} target
+ * @param {*} a
+ */
+exports.merge = function(target, a, arrayMode) {
+  if (a) {
+    const keys = Object.keys(a); // will return an array of own properties
+    const len = keys.length; //don't make it inline
+    for (let i = 0; i < len; i++) {
+      if (arrayMode === 'strict') {
+        target[keys[i]] = [ a[keys[i]] ];
+      } else {
+        target[keys[i]] = a[keys[i]];
+      }
+    }
+  }
+};
+/* exports.merge =function (b,a){
+  return Object.assign(b,a);
+} */
+
+exports.getValue = function(v) {
+  if (exports.isExist(v)) {
+    return v;
+  } else {
+    return '';
+  }
+};
+
+// const fakeCall = function(a) {return a;};
+// const fakeCallNoReturn = function() {};
+
+exports.isName = isName;
+exports.getAllMatches = getAllMatches;
+exports.nameRegexp = nameRegexp;
+
+
+/***/ }),
+
+/***/ 9433:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const util = __nccwpck_require__(7019);
+
+const defaultOptions = {
+  allowBooleanAttributes: false, //A tag can have attributes without any value
+  unpairedTags: []
+};
+
+//const tagsPattern = new RegExp("<\\/?([\\w:\\-_\.]+)\\s*\/?>","g");
+exports.validate = function (xmlData, options) {
+  options = Object.assign({}, defaultOptions, options);
+
+  //xmlData = xmlData.replace(/(\r\n|\n|\r)/gm,"");//make it single line
+  //xmlData = xmlData.replace(/(^\s*<\?xml.*?\?>)/g,"");//Remove XML starting tag
+  //xmlData = xmlData.replace(/(<!DOCTYPE[\s\w\"\.\/\-\:]+(\[.*\])*\s*>)/g,"");//Remove DOCTYPE
+  const tags = [];
+  let tagFound = false;
+
+  //indicates that the root tag has been closed (aka. depth 0 has been reached)
+  let reachedRoot = false;
+
+  if (xmlData[0] === '\ufeff') {
+    // check for byte order mark (BOM)
+    xmlData = xmlData.substr(1);
+  }
+  
+  for (let i = 0; i < xmlData.length; i++) {
+
+    if (xmlData[i] === '<' && xmlData[i+1] === '?') {
+      i+=2;
+      i = readPI(xmlData,i);
+      if (i.err) return i;
+    }else if (xmlData[i] === '<') {
+      //starting of tag
+      //read until you reach to '>' avoiding any '>' in attribute value
+      let tagStartPos = i;
+      i++;
+      
+      if (xmlData[i] === '!') {
+        i = readCommentAndCDATA(xmlData, i);
+        continue;
+      } else {
+        let closingTag = false;
+        if (xmlData[i] === '/') {
+          //closing tag
+          closingTag = true;
+          i++;
+        }
+        //read tagname
+        let tagName = '';
+        for (; i < xmlData.length &&
+          xmlData[i] !== '>' &&
+          xmlData[i] !== ' ' &&
+          xmlData[i] !== '\t' &&
+          xmlData[i] !== '\n' &&
+          xmlData[i] !== '\r'; i++
+        ) {
+          tagName += xmlData[i];
+        }
+        tagName = tagName.trim();
+        //console.log(tagName);
+
+        if (tagName[tagName.length - 1] === '/') {
+          //self closing tag without attributes
+          tagName = tagName.substring(0, tagName.length - 1);
+          //continue;
+          i--;
+        }
+        if (!validateTagName(tagName)) {
+          let msg;
+          if (tagName.trim().length === 0) {
+            msg = "Invalid space after '<'.";
+          } else {
+            msg = "Tag '"+tagName+"' is an invalid name.";
+          }
+          return getErrorObject('InvalidTag', msg, getLineNumberForPosition(xmlData, i));
+        }
+
+        const result = readAttributeStr(xmlData, i);
+        if (result === false) {
+          return getErrorObject('InvalidAttr', "Attributes for '"+tagName+"' have open quote.", getLineNumberForPosition(xmlData, i));
+        }
+        let attrStr = result.value;
+        i = result.index;
+
+        if (attrStr[attrStr.length - 1] === '/') {
+          //self closing tag
+          const attrStrStart = i - attrStr.length;
+          attrStr = attrStr.substring(0, attrStr.length - 1);
+          const isValid = validateAttributeString(attrStr, options);
+          if (isValid === true) {
+            tagFound = true;
+            //continue; //text may presents after self closing tag
+          } else {
+            //the result from the nested function returns the position of the error within the attribute
+            //in order to get the 'true' error line, we need to calculate the position where the attribute begins (i - attrStr.length) and then add the position within the attribute
+            //this gives us the absolute index in the entire xml, which we can use to find the line at last
+            return getErrorObject(isValid.err.code, isValid.err.msg, getLineNumberForPosition(xmlData, attrStrStart + isValid.err.line));
+          }
+        } else if (closingTag) {
+          if (!result.tagClosed) {
+            return getErrorObject('InvalidTag', "Closing tag '"+tagName+"' doesn't have proper closing.", getLineNumberForPosition(xmlData, i));
+          } else if (attrStr.trim().length > 0) {
+            return getErrorObject('InvalidTag', "Closing tag '"+tagName+"' can't have attributes or invalid starting.", getLineNumberForPosition(xmlData, tagStartPos));
+          } else if (tags.length === 0) {
+            return getErrorObject('InvalidTag', "Closing tag '"+tagName+"' has not been opened.", getLineNumberForPosition(xmlData, tagStartPos));
+          } else {
+            const otg = tags.pop();
+            if (tagName !== otg.tagName) {
+              let openPos = getLineNumberForPosition(xmlData, otg.tagStartPos);
+              return getErrorObject('InvalidTag',
+                "Expected closing tag '"+otg.tagName+"' (opened in line "+openPos.line+", col "+openPos.col+") instead of closing tag '"+tagName+"'.",
+                getLineNumberForPosition(xmlData, tagStartPos));
+            }
+
+            //when there are no more tags, we reached the root level.
+            if (tags.length == 0) {
+              reachedRoot = true;
+            }
+          }
+        } else {
+          const isValid = validateAttributeString(attrStr, options);
+          if (isValid !== true) {
+            //the result from the nested function returns the position of the error within the attribute
+            //in order to get the 'true' error line, we need to calculate the position where the attribute begins (i - attrStr.length) and then add the position within the attribute
+            //this gives us the absolute index in the entire xml, which we can use to find the line at last
+            return getErrorObject(isValid.err.code, isValid.err.msg, getLineNumberForPosition(xmlData, i - attrStr.length + isValid.err.line));
+          }
+
+          //if the root level has been reached before ...
+          if (reachedRoot === true) {
+            return getErrorObject('InvalidXml', 'Multiple possible root nodes found.', getLineNumberForPosition(xmlData, i));
+          } else if(options.unpairedTags.indexOf(tagName) !== -1){
+            //don't push into stack
+          } else {
+            tags.push({tagName, tagStartPos});
+          }
+          tagFound = true;
+        }
+
+        //skip tag text value
+        //It may include comments and CDATA value
+        for (i++; i < xmlData.length; i++) {
+          if (xmlData[i] === '<') {
+            if (xmlData[i + 1] === '!') {
+              //comment or CADATA
+              i++;
+              i = readCommentAndCDATA(xmlData, i);
+              continue;
+            } else if (xmlData[i+1] === '?') {
+              i = readPI(xmlData, ++i);
+              if (i.err) return i;
+            } else{
+              break;
+            }
+          } else if (xmlData[i] === '&') {
+            const afterAmp = validateAmpersand(xmlData, i);
+            if (afterAmp == -1)
+              return getErrorObject('InvalidChar', "char '&' is not expected.", getLineNumberForPosition(xmlData, i));
+            i = afterAmp;
+          }else{
+            if (reachedRoot === true && !isWhiteSpace(xmlData[i])) {
+              return getErrorObject('InvalidXml', "Extra text at the end", getLineNumberForPosition(xmlData, i));
+            }
+          }
+        } //end of reading tag text value
+        if (xmlData[i] === '<') {
+          i--;
+        }
+      }
+    } else {
+      if ( isWhiteSpace(xmlData[i])) {
+        continue;
+      }
+      return getErrorObject('InvalidChar', "char '"+xmlData[i]+"' is not expected.", getLineNumberForPosition(xmlData, i));
+    }
+  }
+
+  if (!tagFound) {
+    return getErrorObject('InvalidXml', 'Start tag expected.', 1);
+  }else if (tags.length == 1) {
+      return getErrorObject('InvalidTag', "Unclosed tag '"+tags[0].tagName+"'.", getLineNumberForPosition(xmlData, tags[0].tagStartPos));
+  }else if (tags.length > 0) {
+      return getErrorObject('InvalidXml', "Invalid '"+
+          JSON.stringify(tags.map(t => t.tagName), null, 4).replace(/\r?\n/g, '')+
+          "' found.", {line: 1, col: 1});
+  }
+
+  return true;
+};
+
+function isWhiteSpace(char){
+  return char === ' ' || char === '\t' || char === '\n'  || char === '\r';
+}
+/**
+ * Read Processing insstructions and skip
+ * @param {*} xmlData
+ * @param {*} i
+ */
+function readPI(xmlData, i) {
+  const start = i;
+  for (; i < xmlData.length; i++) {
+    if (xmlData[i] == '?' || xmlData[i] == ' ') {
+      //tagname
+      const tagname = xmlData.substr(start, i - start);
+      if (i > 5 && tagname === 'xml') {
+        return getErrorObject('InvalidXml', 'XML declaration allowed only at the start of the document.', getLineNumberForPosition(xmlData, i));
+      } else if (xmlData[i] == '?' && xmlData[i + 1] == '>') {
+        //check if valid attribut string
+        i++;
+        break;
+      } else {
+        continue;
+      }
+    }
+  }
+  return i;
+}
+
+function readCommentAndCDATA(xmlData, i) {
+  if (xmlData.length > i + 5 && xmlData[i + 1] === '-' && xmlData[i + 2] === '-') {
+    //comment
+    for (i += 3; i < xmlData.length; i++) {
+      if (xmlData[i] === '-' && xmlData[i + 1] === '-' && xmlData[i + 2] === '>') {
+        i += 2;
+        break;
+      }
+    }
+  } else if (
+    xmlData.length > i + 8 &&
+    xmlData[i + 1] === 'D' &&
+    xmlData[i + 2] === 'O' &&
+    xmlData[i + 3] === 'C' &&
+    xmlData[i + 4] === 'T' &&
+    xmlData[i + 5] === 'Y' &&
+    xmlData[i + 6] === 'P' &&
+    xmlData[i + 7] === 'E'
+  ) {
+    let angleBracketsCount = 1;
+    for (i += 8; i < xmlData.length; i++) {
+      if (xmlData[i] === '<') {
+        angleBracketsCount++;
+      } else if (xmlData[i] === '>') {
+        angleBracketsCount--;
+        if (angleBracketsCount === 0) {
+          break;
+        }
+      }
+    }
+  } else if (
+    xmlData.length > i + 9 &&
+    xmlData[i + 1] === '[' &&
+    xmlData[i + 2] === 'C' &&
+    xmlData[i + 3] === 'D' &&
+    xmlData[i + 4] === 'A' &&
+    xmlData[i + 5] === 'T' &&
+    xmlData[i + 6] === 'A' &&
+    xmlData[i + 7] === '['
+  ) {
+    for (i += 8; i < xmlData.length; i++) {
+      if (xmlData[i] === ']' && xmlData[i + 1] === ']' && xmlData[i + 2] === '>') {
+        i += 2;
+        break;
+      }
+    }
+  }
+
+  return i;
+}
+
+const doubleQuote = '"';
+const singleQuote = "'";
+
+/**
+ * Keep reading xmlData until '<' is found outside the attribute value.
+ * @param {string} xmlData
+ * @param {number} i
+ */
+function readAttributeStr(xmlData, i) {
+  let attrStr = '';
+  let startChar = '';
+  let tagClosed = false;
+  for (; i < xmlData.length; i++) {
+    if (xmlData[i] === doubleQuote || xmlData[i] === singleQuote) {
+      if (startChar === '') {
+        startChar = xmlData[i];
+      } else if (startChar !== xmlData[i]) {
+        //if vaue is enclosed with double quote then single quotes are allowed inside the value and vice versa
+      } else {
+        startChar = '';
+      }
+    } else if (xmlData[i] === '>') {
+      if (startChar === '') {
+        tagClosed = true;
+        break;
+      }
+    }
+    attrStr += xmlData[i];
+  }
+  if (startChar !== '') {
+    return false;
+  }
+
+  return {
+    value: attrStr,
+    index: i,
+    tagClosed: tagClosed
+  };
+}
+
+/**
+ * Select all the attributes whether valid or invalid.
+ */
+const validAttrStrRegxp = new RegExp('(\\s*)([^\\s=]+)(\\s*=)?(\\s*([\'"])(([\\s\\S])*?)\\5)?', 'g');
+
+//attr, ="sd", a="amit's", a="sd"b="saf", ab  cd=""
+
+function validateAttributeString(attrStr, options) {
+  //console.log("start:"+attrStr+":end");
+
+  //if(attrStr.trim().length === 0) return true; //empty string
+
+  const matches = util.getAllMatches(attrStr, validAttrStrRegxp);
+  const attrNames = {};
+
+  for (let i = 0; i < matches.length; i++) {
+    if (matches[i][1].length === 0) {
+      //nospace before attribute name: a="sd"b="saf"
+      return getErrorObject('InvalidAttr', "Attribute '"+matches[i][2]+"' has no space in starting.", getPositionFromMatch(matches[i]))
+    } else if (matches[i][3] !== undefined && matches[i][4] === undefined) {
+      return getErrorObject('InvalidAttr', "Attribute '"+matches[i][2]+"' is without value.", getPositionFromMatch(matches[i]));
+    } else if (matches[i][3] === undefined && !options.allowBooleanAttributes) {
+      //independent attribute: ab
+      return getErrorObject('InvalidAttr', "boolean attribute '"+matches[i][2]+"' is not allowed.", getPositionFromMatch(matches[i]));
+    }
+    /* else if(matches[i][6] === undefined){//attribute without value: ab=
+                    return { err: { code:"InvalidAttr",msg:"attribute " + matches[i][2] + " has no value assigned."}};
+                } */
+    const attrName = matches[i][2];
+    if (!validateAttrName(attrName)) {
+      return getErrorObject('InvalidAttr', "Attribute '"+attrName+"' is an invalid name.", getPositionFromMatch(matches[i]));
+    }
+    if (!attrNames.hasOwnProperty(attrName)) {
+      //check for duplicate attribute.
+      attrNames[attrName] = 1;
+    } else {
+      return getErrorObject('InvalidAttr', "Attribute '"+attrName+"' is repeated.", getPositionFromMatch(matches[i]));
+    }
+  }
+
+  return true;
+}
+
+function validateNumberAmpersand(xmlData, i) {
+  let re = /\d/;
+  if (xmlData[i] === 'x') {
+    i++;
+    re = /[\da-fA-F]/;
+  }
+  for (; i < xmlData.length; i++) {
+    if (xmlData[i] === ';')
+      return i;
+    if (!xmlData[i].match(re))
+      break;
+  }
+  return -1;
+}
+
+function validateAmpersand(xmlData, i) {
+  // https://www.w3.org/TR/xml/#dt-charref
+  i++;
+  if (xmlData[i] === ';')
+    return -1;
+  if (xmlData[i] === '#') {
+    i++;
+    return validateNumberAmpersand(xmlData, i);
+  }
+  let count = 0;
+  for (; i < xmlData.length; i++, count++) {
+    if (xmlData[i].match(/\w/) && count < 20)
+      continue;
+    if (xmlData[i] === ';')
+      break;
+    return -1;
+  }
+  return i;
+}
+
+function getErrorObject(code, message, lineNumber) {
+  return {
+    err: {
+      code: code,
+      msg: message,
+      line: lineNumber.line || lineNumber,
+      col: lineNumber.col,
+    },
+  };
+}
+
+function validateAttrName(attrName) {
+  return util.isName(attrName);
+}
+
+// const startsWithXML = /^xml/i;
+
+function validateTagName(tagname) {
+  return util.isName(tagname) /* && !tagname.match(startsWithXML) */;
+}
+
+//this function returns the line number for the character at the given index
+function getLineNumberForPosition(xmlData, index) {
+  const lines = xmlData.substring(0, index).split(/\r?\n/);
+  return {
+    line: lines.length,
+
+    // column number is last line's length + 1, because column numbering starts at 1:
+    col: lines[lines.length - 1].length + 1
+  };
+}
+
+//this function returns the position of the first character of match within attrStr
+function getPositionFromMatch(match) {
+  return match.startIndex + match[1].length;
+}
+
+
+/***/ }),
+
+/***/ 659:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+//parse Empty Node as self closing node
+const buildFromOrderedJs = __nccwpck_require__(3997);
+const getIgnoreAttributesFn = __nccwpck_require__(812)
+
+const defaultOptions = {
+  attributeNamePrefix: '@_',
+  attributesGroupName: false,
+  textNodeName: '#text',
+  ignoreAttributes: true,
+  cdataPropName: false,
+  format: false,
+  indentBy: '  ',
+  suppressEmptyNode: false,
+  suppressUnpairedNode: true,
+  suppressBooleanAttributes: true,
+  tagValueProcessor: function(key, a) {
+    return a;
+  },
+  attributeValueProcessor: function(attrName, a) {
+    return a;
+  },
+  preserveOrder: false,
+  commentPropName: false,
+  unpairedTags: [],
+  entities: [
+    { regex: new RegExp("&", "g"), val: "&amp;" },//it must be on top
+    { regex: new RegExp(">", "g"), val: "&gt;" },
+    { regex: new RegExp("<", "g"), val: "&lt;" },
+    { regex: new RegExp("\'", "g"), val: "&apos;" },
+    { regex: new RegExp("\"", "g"), val: "&quot;" }
+  ],
+  processEntities: true,
+  stopNodes: [],
+  // transformTagName: false,
+  // transformAttributeName: false,
+  oneListGroup: false
+};
+
+function Builder(options) {
+  this.options = Object.assign({}, defaultOptions, options);
+  if (this.options.ignoreAttributes === true || this.options.attributesGroupName) {
+    this.isAttribute = function(/*a*/) {
+      return false;
+    };
+  } else {
+    this.ignoreAttributesFn = getIgnoreAttributesFn(this.options.ignoreAttributes)
+    this.attrPrefixLen = this.options.attributeNamePrefix.length;
+    this.isAttribute = isAttribute;
+  }
+
+  this.processTextOrObjNode = processTextOrObjNode
+
+  if (this.options.format) {
+    this.indentate = indentate;
+    this.tagEndChar = '>\n';
+    this.newLine = '\n';
+  } else {
+    this.indentate = function() {
+      return '';
+    };
+    this.tagEndChar = '>';
+    this.newLine = '';
+  }
+}
+
+Builder.prototype.build = function(jObj) {
+  if(this.options.preserveOrder){
+    return buildFromOrderedJs(jObj, this.options);
+  }else {
+    if(Array.isArray(jObj) && this.options.arrayNodeName && this.options.arrayNodeName.length > 1){
+      jObj = {
+        [this.options.arrayNodeName] : jObj
+      }
+    }
+    return this.j2x(jObj, 0, []).val;
+  }
+};
+
+Builder.prototype.j2x = function(jObj, level, ajPath) {
+  let attrStr = '';
+  let val = '';
+  const jPath = ajPath.join('.')
+  for (let key in jObj) {
+    if(!Object.prototype.hasOwnProperty.call(jObj, key)) continue;
+    if (typeof jObj[key] === 'undefined') {
+      // supress undefined node only if it is not an attribute
+      if (this.isAttribute(key)) {
+        val += '';
+      }
+    } else if (jObj[key] === null) {
+      // null attribute should be ignored by the attribute list, but should not cause the tag closing
+      if (this.isAttribute(key)) {
+        val += '';
+      } else if (key[0] === '?') {
+        val += this.indentate(level) + '<' + key + '?' + this.tagEndChar;
+      } else {
+        val += this.indentate(level) + '<' + key + '/' + this.tagEndChar;
+      }
+      // val += this.indentate(level) + '<' + key + '/' + this.tagEndChar;
+    } else if (jObj[key] instanceof Date) {
+      val += this.buildTextValNode(jObj[key], key, '', level);
+    } else if (typeof jObj[key] !== 'object') {
+      //premitive type
+      const attr = this.isAttribute(key);
+      if (attr && !this.ignoreAttributesFn(attr, jPath)) {
+        attrStr += this.buildAttrPairStr(attr, '' + jObj[key]);
+      } else if (!attr) {
+        //tag value
+        if (key === this.options.textNodeName) {
+          let newval = this.options.tagValueProcessor(key, '' + jObj[key]);
+          val += this.replaceEntitiesValue(newval);
+        } else {
+          val += this.buildTextValNode(jObj[key], key, '', level);
+        }
+      }
+    } else if (Array.isArray(jObj[key])) {
+      //repeated nodes
+      const arrLen = jObj[key].length;
+      let listTagVal = "";
+      let listTagAttr = "";
+      for (let j = 0; j < arrLen; j++) {
+        const item = jObj[key][j];
+        if (typeof item === 'undefined') {
+          // supress undefined node
+        } else if (item === null) {
+          if(key[0] === "?") val += this.indentate(level) + '<' + key + '?' + this.tagEndChar;
+          else val += this.indentate(level) + '<' + key + '/' + this.tagEndChar;
+          // val += this.indentate(level) + '<' + key + '/' + this.tagEndChar;
+        } else if (typeof item === 'object') {
+          if(this.options.oneListGroup){
+            const result = this.j2x(item, level + 1, ajPath.concat(key));
+            listTagVal += result.val;
+            if (this.options.attributesGroupName && item.hasOwnProperty(this.options.attributesGroupName)) {
+              listTagAttr += result.attrStr
+            }
+          }else{
+            listTagVal += this.processTextOrObjNode(item, key, level, ajPath)
+          }
+        } else {
+          if (this.options.oneListGroup) {
+            let textValue = this.options.tagValueProcessor(key, item);
+            textValue = this.replaceEntitiesValue(textValue);
+            listTagVal += textValue;
+          } else {
+            listTagVal += this.buildTextValNode(item, key, '', level);
+          }
+        }
+      }
+      if(this.options.oneListGroup){
+        listTagVal = this.buildObjectNode(listTagVal, key, listTagAttr, level);
+      }
+      val += listTagVal;
+    } else {
+      //nested node
+      if (this.options.attributesGroupName && key === this.options.attributesGroupName) {
+        const Ks = Object.keys(jObj[key]);
+        const L = Ks.length;
+        for (let j = 0; j < L; j++) {
+          attrStr += this.buildAttrPairStr(Ks[j], '' + jObj[key][Ks[j]]);
+        }
+      } else {
+        val += this.processTextOrObjNode(jObj[key], key, level, ajPath)
+      }
+    }
+  }
+  return {attrStr: attrStr, val: val};
+};
+
+Builder.prototype.buildAttrPairStr = function(attrName, val){
+  val = this.options.attributeValueProcessor(attrName, '' + val);
+  val = this.replaceEntitiesValue(val);
+  if (this.options.suppressBooleanAttributes && val === "true") {
+    return ' ' + attrName;
+  } else return ' ' + attrName + '="' + val + '"';
+}
+
+function processTextOrObjNode (object, key, level, ajPath) {
+  const result = this.j2x(object, level + 1, ajPath.concat(key));
+  if (object[this.options.textNodeName] !== undefined && Object.keys(object).length === 1) {
+    return this.buildTextValNode(object[this.options.textNodeName], key, result.attrStr, level);
+  } else {
+    return this.buildObjectNode(result.val, key, result.attrStr, level);
+  }
+}
+
+Builder.prototype.buildObjectNode = function(val, key, attrStr, level) {
+  if(val === ""){
+    if(key[0] === "?") return  this.indentate(level) + '<' + key + attrStr+ '?' + this.tagEndChar;
+    else {
+      return this.indentate(level) + '<' + key + attrStr + this.closeTag(key) + this.tagEndChar;
+    }
+  }else{
+
+    let tagEndExp = '</' + key + this.tagEndChar;
+    let piClosingChar = "";
+    
+    if(key[0] === "?") {
+      piClosingChar = "?";
+      tagEndExp = "";
+    }
+  
+    // attrStr is an empty string in case the attribute came as undefined or null
+    if ((attrStr || attrStr === '') && val.indexOf('<') === -1) {
+      return ( this.indentate(level) + '<' +  key + attrStr + piClosingChar + '>' + val + tagEndExp );
+    } else if (this.options.commentPropName !== false && key === this.options.commentPropName && piClosingChar.length === 0) {
+      return this.indentate(level) + `<!--${val}-->` + this.newLine;
+    }else {
+      return (
+        this.indentate(level) + '<' + key + attrStr + piClosingChar + this.tagEndChar +
+        val +
+        this.indentate(level) + tagEndExp    );
+    }
+  }
+}
+
+Builder.prototype.closeTag = function(key){
+  let closeTag = "";
+  if(this.options.unpairedTags.indexOf(key) !== -1){ //unpaired
+    if(!this.options.suppressUnpairedNode) closeTag = "/"
+  }else if(this.options.suppressEmptyNode){ //empty
+    closeTag = "/";
+  }else{
+    closeTag = `></${key}`
+  }
+  return closeTag;
+}
+
+function buildEmptyObjNode(val, key, attrStr, level) {
+  if (val !== '') {
+    return this.buildObjectNode(val, key, attrStr, level);
+  } else {
+    if(key[0] === "?") return  this.indentate(level) + '<' + key + attrStr+ '?' + this.tagEndChar;
+    else {
+      return  this.indentate(level) + '<' + key + attrStr + '/' + this.tagEndChar;
+      // return this.buildTagStr(level,key, attrStr);
+    }
+  }
+}
+
+Builder.prototype.buildTextValNode = function(val, key, attrStr, level) {
+  if (this.options.cdataPropName !== false && key === this.options.cdataPropName) {
+    return this.indentate(level) + `<![CDATA[${val}]]>` +  this.newLine;
+  }else if (this.options.commentPropName !== false && key === this.options.commentPropName) {
+    return this.indentate(level) + `<!--${val}-->` +  this.newLine;
+  }else if(key[0] === "?") {//PI tag
+    return  this.indentate(level) + '<' + key + attrStr+ '?' + this.tagEndChar; 
+  }else{
+    let textValue = this.options.tagValueProcessor(key, val);
+    textValue = this.replaceEntitiesValue(textValue);
+  
+    if( textValue === ''){
+      return this.indentate(level) + '<' + key + attrStr + this.closeTag(key) + this.tagEndChar;
+    }else{
+      return this.indentate(level) + '<' + key + attrStr + '>' +
+         textValue +
+        '</' + key + this.tagEndChar;
+    }
+  }
+}
+
+Builder.prototype.replaceEntitiesValue = function(textValue){
+  if(textValue && textValue.length > 0 && this.options.processEntities){
+    for (let i=0; i<this.options.entities.length; i++) {
+      const entity = this.options.entities[i];
+      textValue = textValue.replace(entity.regex, entity.val);
+    }
+  }
+  return textValue;
+}
+
+function indentate(level) {
+  return this.options.indentBy.repeat(level);
+}
+
+function isAttribute(name /*, options*/) {
+  if (name.startsWith(this.options.attributeNamePrefix) && name !== this.options.textNodeName) {
+    return name.substr(this.attrPrefixLen);
+  } else {
+    return false;
+  }
+}
+
+module.exports = Builder;
+
+
+/***/ }),
+
+/***/ 3997:
+/***/ ((module) => {
+
+const EOL = "\n";
+
+/**
+ * 
+ * @param {array} jArray 
+ * @param {any} options 
+ * @returns 
+ */
+function toXml(jArray, options) {
+    let indentation = "";
+    if (options.format && options.indentBy.length > 0) {
+        indentation = EOL;
+    }
+    return arrToStr(jArray, options, "", indentation);
+}
+
+function arrToStr(arr, options, jPath, indentation) {
+    let xmlStr = "";
+    let isPreviousElementTag = false;
+
+    for (let i = 0; i < arr.length; i++) {
+        const tagObj = arr[i];
+        const tagName = propName(tagObj);
+        if(tagName === undefined) continue;
+
+        let newJPath = "";
+        if (jPath.length === 0) newJPath = tagName
+        else newJPath = `${jPath}.${tagName}`;
+
+        if (tagName === options.textNodeName) {
+            let tagText = tagObj[tagName];
+            if (!isStopNode(newJPath, options)) {
+                tagText = options.tagValueProcessor(tagName, tagText);
+                tagText = replaceEntitiesValue(tagText, options);
+            }
+            if (isPreviousElementTag) {
+                xmlStr += indentation;
+            }
+            xmlStr += tagText;
+            isPreviousElementTag = false;
+            continue;
+        } else if (tagName === options.cdataPropName) {
+            if (isPreviousElementTag) {
+                xmlStr += indentation;
+            }
+            xmlStr += `<![CDATA[${tagObj[tagName][0][options.textNodeName]}]]>`;
+            isPreviousElementTag = false;
+            continue;
+        } else if (tagName === options.commentPropName) {
+            xmlStr += indentation + `<!--${tagObj[tagName][0][options.textNodeName]}-->`;
+            isPreviousElementTag = true;
+            continue;
+        } else if (tagName[0] === "?") {
+            const attStr = attr_to_str(tagObj[":@"], options);
+            const tempInd = tagName === "?xml" ? "" : indentation;
+            let piTextNodeName = tagObj[tagName][0][options.textNodeName];
+            piTextNodeName = piTextNodeName.length !== 0 ? " " + piTextNodeName : ""; //remove extra spacing
+            xmlStr += tempInd + `<${tagName}${piTextNodeName}${attStr}?>`;
+            isPreviousElementTag = true;
+            continue;
+        }
+        let newIdentation = indentation;
+        if (newIdentation !== "") {
+            newIdentation += options.indentBy;
+        }
+        const attStr = attr_to_str(tagObj[":@"], options);
+        const tagStart = indentation + `<${tagName}${attStr}`;
+        const tagValue = arrToStr(tagObj[tagName], options, newJPath, newIdentation);
+        if (options.unpairedTags.indexOf(tagName) !== -1) {
+            if (options.suppressUnpairedNode) xmlStr += tagStart + ">";
+            else xmlStr += tagStart + "/>";
+        } else if ((!tagValue || tagValue.length === 0) && options.suppressEmptyNode) {
+            xmlStr += tagStart + "/>";
+        } else if (tagValue && tagValue.endsWith(">")) {
+            xmlStr += tagStart + `>${tagValue}${indentation}</${tagName}>`;
+        } else {
+            xmlStr += tagStart + ">";
+            if (tagValue && indentation !== "" && (tagValue.includes("/>") || tagValue.includes("</"))) {
+                xmlStr += indentation + options.indentBy + tagValue + indentation;
+            } else {
+                xmlStr += tagValue;
+            }
+            xmlStr += `</${tagName}>`;
+        }
+        isPreviousElementTag = true;
+    }
+
+    return xmlStr;
+}
+
+function propName(obj) {
+    const keys = Object.keys(obj);
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        if(!obj.hasOwnProperty(key)) continue;
+        if (key !== ":@") return key;
+    }
+}
+
+function attr_to_str(attrMap, options) {
+    let attrStr = "";
+    if (attrMap && !options.ignoreAttributes) {
+        for (let attr in attrMap) {
+            if(!attrMap.hasOwnProperty(attr)) continue;
+            let attrVal = options.attributeValueProcessor(attr, attrMap[attr]);
+            attrVal = replaceEntitiesValue(attrVal, options);
+            if (attrVal === true && options.suppressBooleanAttributes) {
+                attrStr += ` ${attr.substr(options.attributeNamePrefix.length)}`;
+            } else {
+                attrStr += ` ${attr.substr(options.attributeNamePrefix.length)}="${attrVal}"`;
+            }
+        }
+    }
+    return attrStr;
+}
+
+function isStopNode(jPath, options) {
+    jPath = jPath.substr(0, jPath.length - options.textNodeName.length - 1);
+    let tagName = jPath.substr(jPath.lastIndexOf(".") + 1);
+    for (let index in options.stopNodes) {
+        if (options.stopNodes[index] === jPath || options.stopNodes[index] === "*." + tagName) return true;
+    }
+    return false;
+}
+
+function replaceEntitiesValue(textValue, options) {
+    if (textValue && textValue.length > 0 && options.processEntities) {
+        for (let i = 0; i < options.entities.length; i++) {
+            const entity = options.entities[i];
+            textValue = textValue.replace(entity.regex, entity.val);
+        }
+    }
+    return textValue;
+}
+module.exports = toXml;
+
+
+/***/ }),
+
+/***/ 151:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const util = __nccwpck_require__(7019);
+
+//TODO: handle comments
+function readDocType(xmlData, i){
+    
+    const entities = {};
+    if( xmlData[i + 3] === 'O' &&
+         xmlData[i + 4] === 'C' &&
+         xmlData[i + 5] === 'T' &&
+         xmlData[i + 6] === 'Y' &&
+         xmlData[i + 7] === 'P' &&
+         xmlData[i + 8] === 'E')
+    {    
+        i = i+9;
+        let angleBracketsCount = 1;
+        let hasBody = false, comment = false;
+        let exp = "";
+        for(;i<xmlData.length;i++){
+            if (xmlData[i] === '<' && !comment) { //Determine the tag type
+                if( hasBody && isEntity(xmlData, i)){
+                    i += 7; 
+                    [entityName, val,i] = readEntityExp(xmlData,i+1);
+                    if(val.indexOf("&") === -1) //Parameter entities are not supported
+                        entities[ validateEntityName(entityName) ] = {
+                            regx : RegExp( `&${entityName};`,"g"),
+                            val: val
+                        };
+                }
+                else if( hasBody && isElement(xmlData, i))  i += 8;//Not supported
+                else if( hasBody && isAttlist(xmlData, i))  i += 8;//Not supported
+                else if( hasBody && isNotation(xmlData, i)) i += 9;//Not supported
+                else if( isComment)                         comment = true;
+                else                                        throw new Error("Invalid DOCTYPE");
+
+                angleBracketsCount++;
+                exp = "";
+            } else if (xmlData[i] === '>') { //Read tag content
+                if(comment){
+                    if( xmlData[i - 1] === "-" && xmlData[i - 2] === "-"){
+                        comment = false;
+                        angleBracketsCount--;
+                    }
+                }else{
+                    angleBracketsCount--;
+                }
+                if (angleBracketsCount === 0) {
+                  break;
+                }
+            }else if( xmlData[i] === '['){
+                hasBody = true;
+            }else{
+                exp += xmlData[i];
+            }
+        }
+        if(angleBracketsCount !== 0){
+            throw new Error(`Unclosed DOCTYPE`);
+        }
+    }else{
+        throw new Error(`Invalid Tag instead of DOCTYPE`);
+    }
+    return {entities, i};
+}
+
+function readEntityExp(xmlData,i){
+    //External entities are not supported
+    //    <!ENTITY ext SYSTEM "http://normal-website.com" >
+
+    //Parameter entities are not supported
+    //    <!ENTITY entityname "&anotherElement;">
+
+    //Internal entities are supported
+    //    <!ENTITY entityname "replacement text">
+    
+    //read EntityName
+    let entityName = "";
+    for (; i < xmlData.length && (xmlData[i] !== "'" && xmlData[i] !== '"' ); i++) {
+        // if(xmlData[i] === " ") continue;
+        // else 
+        entityName += xmlData[i];
+    }
+    entityName = entityName.trim();
+    if(entityName.indexOf(" ") !== -1) throw new Error("External entites are not supported");
+
+    //read Entity Value
+    const startChar = xmlData[i++];
+    let val = ""
+    for (; i < xmlData.length && xmlData[i] !== startChar ; i++) {
+        val += xmlData[i];
+    }
+    return [entityName, val, i];
+}
+
+function isComment(xmlData, i){
+    if(xmlData[i+1] === '!' &&
+    xmlData[i+2] === '-' &&
+    xmlData[i+3] === '-') return true
+    return false
+}
+function isEntity(xmlData, i){
+    if(xmlData[i+1] === '!' &&
+    xmlData[i+2] === 'E' &&
+    xmlData[i+3] === 'N' &&
+    xmlData[i+4] === 'T' &&
+    xmlData[i+5] === 'I' &&
+    xmlData[i+6] === 'T' &&
+    xmlData[i+7] === 'Y') return true
+    return false
+}
+function isElement(xmlData, i){
+    if(xmlData[i+1] === '!' &&
+    xmlData[i+2] === 'E' &&
+    xmlData[i+3] === 'L' &&
+    xmlData[i+4] === 'E' &&
+    xmlData[i+5] === 'M' &&
+    xmlData[i+6] === 'E' &&
+    xmlData[i+7] === 'N' &&
+    xmlData[i+8] === 'T') return true
+    return false
+}
+
+function isAttlist(xmlData, i){
+    if(xmlData[i+1] === '!' &&
+    xmlData[i+2] === 'A' &&
+    xmlData[i+3] === 'T' &&
+    xmlData[i+4] === 'T' &&
+    xmlData[i+5] === 'L' &&
+    xmlData[i+6] === 'I' &&
+    xmlData[i+7] === 'S' &&
+    xmlData[i+8] === 'T') return true
+    return false
+}
+function isNotation(xmlData, i){
+    if(xmlData[i+1] === '!' &&
+    xmlData[i+2] === 'N' &&
+    xmlData[i+3] === 'O' &&
+    xmlData[i+4] === 'T' &&
+    xmlData[i+5] === 'A' &&
+    xmlData[i+6] === 'T' &&
+    xmlData[i+7] === 'I' &&
+    xmlData[i+8] === 'O' &&
+    xmlData[i+9] === 'N') return true
+    return false
+}
+
+function validateEntityName(name){
+    if (util.isName(name))
+	return name;
+    else
+        throw new Error(`Invalid entity name ${name}`);
+}
+
+module.exports = readDocType;
+
+
+/***/ }),
+
+/***/ 4769:
+/***/ ((__unused_webpack_module, exports) => {
+
+
+const defaultOptions = {
+    preserveOrder: false,
+    attributeNamePrefix: '@_',
+    attributesGroupName: false,
+    textNodeName: '#text',
+    ignoreAttributes: true,
+    removeNSPrefix: false, // remove NS from tag name or attribute name if true
+    allowBooleanAttributes: false, //a tag can have attributes without any value
+    //ignoreRootElement : false,
+    parseTagValue: true,
+    parseAttributeValue: false,
+    trimValues: true, //Trim string values of tag and attributes
+    cdataPropName: false,
+    numberParseOptions: {
+      hex: true,
+      leadingZeros: true,
+      eNotation: true
+    },
+    tagValueProcessor: function(tagName, val) {
+      return val;
+    },
+    attributeValueProcessor: function(attrName, val) {
+      return val;
+    },
+    stopNodes: [], //nested tags will not be parsed even for errors
+    alwaysCreateTextNode: false,
+    isArray: () => false,
+    commentPropName: false,
+    unpairedTags: [],
+    processEntities: true,
+    htmlEntities: false,
+    ignoreDeclaration: false,
+    ignorePiTags: false,
+    transformTagName: false,
+    transformAttributeName: false,
+    updateTag: function(tagName, jPath, attrs){
+      return tagName
+    },
+    // skipEmptyListItem: false
+};
+   
+const buildOptions = function(options) {
+    return Object.assign({}, defaultOptions, options);
+};
+
+exports.buildOptions = buildOptions;
+exports.defaultOptions = defaultOptions;
+
+/***/ }),
+
+/***/ 3017:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+///@ts-check
+
+const util = __nccwpck_require__(7019);
+const xmlNode = __nccwpck_require__(9307);
+const readDocType = __nccwpck_require__(151);
+const toNumber = __nccwpck_require__(6496);
+const getIgnoreAttributesFn = __nccwpck_require__(812)
+
+// const regx =
+//   '<((!\\[CDATA\\[([\\s\\S]*?)(]]>))|((NAME:)?(NAME))([^>]*)>|((\\/)(NAME)\\s*>))([^<]*)'
+//   .replace(/NAME/g, util.nameRegexp);
+
+//const tagsRegx = new RegExp("<(\\/?[\\w:\\-\._]+)([^>]*)>(\\s*"+cdataRegx+")*([^<]+)?","g");
+//const tagsRegx = new RegExp("<(\\/?)((\\w*:)?([\\w:\\-\._]+))([^>]*)>([^<]*)("+cdataRegx+"([^<]*))*([^<]+)?","g");
+
+class OrderedObjParser{
+  constructor(options){
+    this.options = options;
+    this.currentNode = null;
+    this.tagsNodeStack = [];
+    this.docTypeEntities = {};
+    this.lastEntities = {
+      "apos" : { regex: /&(apos|#39|#x27);/g, val : "'"},
+      "gt" : { regex: /&(gt|#62|#x3E);/g, val : ">"},
+      "lt" : { regex: /&(lt|#60|#x3C);/g, val : "<"},
+      "quot" : { regex: /&(quot|#34|#x22);/g, val : "\""},
+    };
+    this.ampEntity = { regex: /&(amp|#38|#x26);/g, val : "&"};
+    this.htmlEntities = {
+      "space": { regex: /&(nbsp|#160);/g, val: " " },
+      // "lt" : { regex: /&(lt|#60);/g, val: "<" },
+      // "gt" : { regex: /&(gt|#62);/g, val: ">" },
+      // "amp" : { regex: /&(amp|#38);/g, val: "&" },
+      // "quot" : { regex: /&(quot|#34);/g, val: "\"" },
+      // "apos" : { regex: /&(apos|#39);/g, val: "'" },
+      "cent" : { regex: /&(cent|#162);/g, val: "¢" },
+      "pound" : { regex: /&(pound|#163);/g, val: "£" },
+      "yen" : { regex: /&(yen|#165);/g, val: "¥" },
+      "euro" : { regex: /&(euro|#8364);/g, val: "€" },
+      "copyright" : { regex: /&(copy|#169);/g, val: "©" },
+      "reg" : { regex: /&(reg|#174);/g, val: "®" },
+      "inr" : { regex: /&(inr|#8377);/g, val: "₹" },
+      "num_dec": { regex: /&#([0-9]{1,7});/g, val : (_, str) => String.fromCharCode(Number.parseInt(str, 10)) },
+      "num_hex": { regex: /&#x([0-9a-fA-F]{1,6});/g, val : (_, str) => String.fromCharCode(Number.parseInt(str, 16)) },
+    };
+    this.addExternalEntities = addExternalEntities;
+    this.parseXml = parseXml;
+    this.parseTextData = parseTextData;
+    this.resolveNameSpace = resolveNameSpace;
+    this.buildAttributesMap = buildAttributesMap;
+    this.isItStopNode = isItStopNode;
+    this.replaceEntitiesValue = replaceEntitiesValue;
+    this.readStopNodeData = readStopNodeData;
+    this.saveTextToParentTag = saveTextToParentTag;
+    this.addChild = addChild;
+    this.ignoreAttributesFn = getIgnoreAttributesFn(this.options.ignoreAttributes)
+  }
+
+}
+
+function addExternalEntities(externalEntities){
+  const entKeys = Object.keys(externalEntities);
+  for (let i = 0; i < entKeys.length; i++) {
+    const ent = entKeys[i];
+    this.lastEntities[ent] = {
+       regex: new RegExp("&"+ent+";","g"),
+       val : externalEntities[ent]
+    }
+  }
+}
+
+/**
+ * @param {string} val
+ * @param {string} tagName
+ * @param {string} jPath
+ * @param {boolean} dontTrim
+ * @param {boolean} hasAttributes
+ * @param {boolean} isLeafNode
+ * @param {boolean} escapeEntities
+ */
+function parseTextData(val, tagName, jPath, dontTrim, hasAttributes, isLeafNode, escapeEntities) {
+  if (val !== undefined) {
+    if (this.options.trimValues && !dontTrim) {
+      val = val.trim();
+    }
+    if(val.length > 0){
+      if(!escapeEntities) val = this.replaceEntitiesValue(val);
+      
+      const newval = this.options.tagValueProcessor(tagName, val, jPath, hasAttributes, isLeafNode);
+      if(newval === null || newval === undefined){
+        //don't parse
+        return val;
+      }else if(typeof newval !== typeof val || newval !== val){
+        //overwrite
+        return newval;
+      }else if(this.options.trimValues){
+        return parseValue(val, this.options.parseTagValue, this.options.numberParseOptions);
+      }else{
+        const trimmedVal = val.trim();
+        if(trimmedVal === val){
+          return parseValue(val, this.options.parseTagValue, this.options.numberParseOptions);
+        }else{
+          return val;
+        }
+      }
+    }
+  }
+}
+
+function resolveNameSpace(tagname) {
+  if (this.options.removeNSPrefix) {
+    const tags = tagname.split(':');
+    const prefix = tagname.charAt(0) === '/' ? '/' : '';
+    if (tags[0] === 'xmlns') {
+      return '';
+    }
+    if (tags.length === 2) {
+      tagname = prefix + tags[1];
+    }
+  }
+  return tagname;
+}
+
+//TODO: change regex to capture NS
+//const attrsRegx = new RegExp("([\\w\\-\\.\\:]+)\\s*=\\s*(['\"])((.|\n)*?)\\2","gm");
+const attrsRegx = new RegExp('([^\\s=]+)\\s*(=\\s*([\'"])([\\s\\S]*?)\\3)?', 'gm');
+
+function buildAttributesMap(attrStr, jPath, tagName) {
+  if (this.options.ignoreAttributes !== true && typeof attrStr === 'string') {
+    // attrStr = attrStr.replace(/\r?\n/g, ' ');
+    //attrStr = attrStr || attrStr.trim();
+
+    const matches = util.getAllMatches(attrStr, attrsRegx);
+    const len = matches.length; //don't make it inline
+    const attrs = {};
+    for (let i = 0; i < len; i++) {
+      const attrName = this.resolveNameSpace(matches[i][1]);
+      if (this.ignoreAttributesFn(attrName, jPath)) {
+        continue
+      }
+      let oldVal = matches[i][4];
+      let aName = this.options.attributeNamePrefix + attrName;
+      if (attrName.length) {
+        if (this.options.transformAttributeName) {
+          aName = this.options.transformAttributeName(aName);
+        }
+        if(aName === "__proto__") aName  = "#__proto__";
+        if (oldVal !== undefined) {
+          if (this.options.trimValues) {
+            oldVal = oldVal.trim();
+          }
+          oldVal = this.replaceEntitiesValue(oldVal);
+          const newVal = this.options.attributeValueProcessor(attrName, oldVal, jPath);
+          if(newVal === null || newVal === undefined){
+            //don't parse
+            attrs[aName] = oldVal;
+          }else if(typeof newVal !== typeof oldVal || newVal !== oldVal){
+            //overwrite
+            attrs[aName] = newVal;
+          }else{
+            //parse
+            attrs[aName] = parseValue(
+              oldVal,
+              this.options.parseAttributeValue,
+              this.options.numberParseOptions
+            );
+          }
+        } else if (this.options.allowBooleanAttributes) {
+          attrs[aName] = true;
+        }
+      }
+    }
+    if (!Object.keys(attrs).length) {
+      return;
+    }
+    if (this.options.attributesGroupName) {
+      const attrCollection = {};
+      attrCollection[this.options.attributesGroupName] = attrs;
+      return attrCollection;
+    }
+    return attrs
+  }
+}
+
+const parseXml = function(xmlData) {
+  xmlData = xmlData.replace(/\r\n?/g, "\n"); //TODO: remove this line
+  const xmlObj = new xmlNode('!xml');
+  let currentNode = xmlObj;
+  let textData = "";
+  let jPath = "";
+  for(let i=0; i< xmlData.length; i++){//for each char in XML data
+    const ch = xmlData[i];
+    if(ch === '<'){
+      // const nextIndex = i+1;
+      // const _2ndChar = xmlData[nextIndex];
+      if( xmlData[i+1] === '/') {//Closing Tag
+        const closeIndex = findClosingIndex(xmlData, ">", i, "Closing Tag is not closed.")
+        let tagName = xmlData.substring(i+2,closeIndex).trim();
+
+        if(this.options.removeNSPrefix){
+          const colonIndex = tagName.indexOf(":");
+          if(colonIndex !== -1){
+            tagName = tagName.substr(colonIndex+1);
+          }
+        }
+
+        if(this.options.transformTagName) {
+          tagName = this.options.transformTagName(tagName);
+        }
+
+        if(currentNode){
+          textData = this.saveTextToParentTag(textData, currentNode, jPath);
+        }
+
+        //check if last tag of nested tag was unpaired tag
+        const lastTagName = jPath.substring(jPath.lastIndexOf(".")+1);
+        if(tagName && this.options.unpairedTags.indexOf(tagName) !== -1 ){
+          throw new Error(`Unpaired tag can not be used as closing tag: </${tagName}>`);
+        }
+        let propIndex = 0
+        if(lastTagName && this.options.unpairedTags.indexOf(lastTagName) !== -1 ){
+          propIndex = jPath.lastIndexOf('.', jPath.lastIndexOf('.')-1)
+          this.tagsNodeStack.pop();
+        }else{
+          propIndex = jPath.lastIndexOf(".");
+        }
+        jPath = jPath.substring(0, propIndex);
+
+        currentNode = this.tagsNodeStack.pop();//avoid recursion, set the parent tag scope
+        textData = "";
+        i = closeIndex;
+      } else if( xmlData[i+1] === '?') {
+
+        let tagData = readTagExp(xmlData,i, false, "?>");
+        if(!tagData) throw new Error("Pi Tag is not closed.");
+
+        textData = this.saveTextToParentTag(textData, currentNode, jPath);
+        if( (this.options.ignoreDeclaration && tagData.tagName === "?xml") || this.options.ignorePiTags){
+
+        }else{
+  
+          const childNode = new xmlNode(tagData.tagName);
+          childNode.add(this.options.textNodeName, "");
+          
+          if(tagData.tagName !== tagData.tagExp && tagData.attrExpPresent){
+            childNode[":@"] = this.buildAttributesMap(tagData.tagExp, jPath, tagData.tagName);
+          }
+          this.addChild(currentNode, childNode, jPath)
+
+        }
+
+
+        i = tagData.closeIndex + 1;
+      } else if(xmlData.substr(i + 1, 3) === '!--') {
+        const endIndex = findClosingIndex(xmlData, "-->", i+4, "Comment is not closed.")
+        if(this.options.commentPropName){
+          const comment = xmlData.substring(i + 4, endIndex - 2);
+
+          textData = this.saveTextToParentTag(textData, currentNode, jPath);
+
+          currentNode.add(this.options.commentPropName, [ { [this.options.textNodeName] : comment } ]);
+        }
+        i = endIndex;
+      } else if( xmlData.substr(i + 1, 2) === '!D') {
+        const result = readDocType(xmlData, i);
+        this.docTypeEntities = result.entities;
+        i = result.i;
+      }else if(xmlData.substr(i + 1, 2) === '![') {
+        const closeIndex = findClosingIndex(xmlData, "]]>", i, "CDATA is not closed.") - 2;
+        const tagExp = xmlData.substring(i + 9,closeIndex);
+
+        textData = this.saveTextToParentTag(textData, currentNode, jPath);
+
+        let val = this.parseTextData(tagExp, currentNode.tagname, jPath, true, false, true, true);
+        if(val == undefined) val = "";
+
+        //cdata should be set even if it is 0 length string
+        if(this.options.cdataPropName){
+          currentNode.add(this.options.cdataPropName, [ { [this.options.textNodeName] : tagExp } ]);
+        }else{
+          currentNode.add(this.options.textNodeName, val);
+        }
+        
+        i = closeIndex + 2;
+      }else {//Opening tag
+        let result = readTagExp(xmlData,i, this.options.removeNSPrefix);
+        let tagName= result.tagName;
+        const rawTagName = result.rawTagName;
+        let tagExp = result.tagExp;
+        let attrExpPresent = result.attrExpPresent;
+        let closeIndex = result.closeIndex;
+
+        if (this.options.transformTagName) {
+          tagName = this.options.transformTagName(tagName);
+        }
+        
+        //save text as child node
+        if (currentNode && textData) {
+          if(currentNode.tagname !== '!xml'){
+            //when nested tag is found
+            textData = this.saveTextToParentTag(textData, currentNode, jPath, false);
+          }
+        }
+
+        //check if last tag was unpaired tag
+        const lastTag = currentNode;
+        if(lastTag && this.options.unpairedTags.indexOf(lastTag.tagname) !== -1 ){
+          currentNode = this.tagsNodeStack.pop();
+          jPath = jPath.substring(0, jPath.lastIndexOf("."));
+        }
+        if(tagName !== xmlObj.tagname){
+          jPath += jPath ? "." + tagName : tagName;
+        }
+        if (this.isItStopNode(this.options.stopNodes, jPath, tagName)) {
+          let tagContent = "";
+          //self-closing tag
+          if(tagExp.length > 0 && tagExp.lastIndexOf("/") === tagExp.length - 1){
+            if(tagName[tagName.length - 1] === "/"){ //remove trailing '/'
+              tagName = tagName.substr(0, tagName.length - 1);
+              jPath = jPath.substr(0, jPath.length - 1);
+              tagExp = tagName;
+            }else{
+              tagExp = tagExp.substr(0, tagExp.length - 1);
+            }
+            i = result.closeIndex;
+          }
+          //unpaired tag
+          else if(this.options.unpairedTags.indexOf(tagName) !== -1){
+            
+            i = result.closeIndex;
+          }
+          //normal tag
+          else{
+            //read until closing tag is found
+            const result = this.readStopNodeData(xmlData, rawTagName, closeIndex + 1);
+            if(!result) throw new Error(`Unexpected end of ${rawTagName}`);
+            i = result.i;
+            tagContent = result.tagContent;
+          }
+
+          const childNode = new xmlNode(tagName);
+          if(tagName !== tagExp && attrExpPresent){
+            childNode[":@"] = this.buildAttributesMap(tagExp, jPath, tagName);
+          }
+          if(tagContent) {
+            tagContent = this.parseTextData(tagContent, tagName, jPath, true, attrExpPresent, true, true);
+          }
+          
+          jPath = jPath.substr(0, jPath.lastIndexOf("."));
+          childNode.add(this.options.textNodeName, tagContent);
+          
+          this.addChild(currentNode, childNode, jPath)
+        }else{
+  //selfClosing tag
+          if(tagExp.length > 0 && tagExp.lastIndexOf("/") === tagExp.length - 1){
+            if(tagName[tagName.length - 1] === "/"){ //remove trailing '/'
+              tagName = tagName.substr(0, tagName.length - 1);
+              jPath = jPath.substr(0, jPath.length - 1);
+              tagExp = tagName;
+            }else{
+              tagExp = tagExp.substr(0, tagExp.length - 1);
+            }
+            
+            if(this.options.transformTagName) {
+              tagName = this.options.transformTagName(tagName);
+            }
+
+            const childNode = new xmlNode(tagName);
+            if(tagName !== tagExp && attrExpPresent){
+              childNode[":@"] = this.buildAttributesMap(tagExp, jPath, tagName);
+            }
+            this.addChild(currentNode, childNode, jPath)
+            jPath = jPath.substr(0, jPath.lastIndexOf("."));
+          }
+    //opening tag
+          else{
+            const childNode = new xmlNode( tagName);
+            this.tagsNodeStack.push(currentNode);
+            
+            if(tagName !== tagExp && attrExpPresent){
+              childNode[":@"] = this.buildAttributesMap(tagExp, jPath, tagName);
+            }
+            this.addChild(currentNode, childNode, jPath)
+            currentNode = childNode;
+          }
+          textData = "";
+          i = closeIndex;
+        }
+      }
+    }else{
+      textData += xmlData[i];
+    }
+  }
+  return xmlObj.child;
+}
+
+function addChild(currentNode, childNode, jPath){
+  const result = this.options.updateTag(childNode.tagname, jPath, childNode[":@"])
+  if(result === false){
+  }else if(typeof result === "string"){
+    childNode.tagname = result
+    currentNode.addChild(childNode);
+  }else{
+    currentNode.addChild(childNode);
+  }
+}
+
+const replaceEntitiesValue = function(val){
+
+  if(this.options.processEntities){
+    for(let entityName in this.docTypeEntities){
+      const entity = this.docTypeEntities[entityName];
+      val = val.replace( entity.regx, entity.val);
+    }
+    for(let entityName in this.lastEntities){
+      const entity = this.lastEntities[entityName];
+      val = val.replace( entity.regex, entity.val);
+    }
+    if(this.options.htmlEntities){
+      for(let entityName in this.htmlEntities){
+        const entity = this.htmlEntities[entityName];
+        val = val.replace( entity.regex, entity.val);
+      }
+    }
+    val = val.replace( this.ampEntity.regex, this.ampEntity.val);
+  }
+  return val;
+}
+function saveTextToParentTag(textData, currentNode, jPath, isLeafNode) {
+  if (textData) { //store previously collected data as textNode
+    if(isLeafNode === undefined) isLeafNode = Object.keys(currentNode.child).length === 0
+    
+    textData = this.parseTextData(textData,
+      currentNode.tagname,
+      jPath,
+      false,
+      currentNode[":@"] ? Object.keys(currentNode[":@"]).length !== 0 : false,
+      isLeafNode);
+
+    if (textData !== undefined && textData !== "")
+      currentNode.add(this.options.textNodeName, textData);
+    textData = "";
+  }
+  return textData;
+}
+
+//TODO: use jPath to simplify the logic
+/**
+ * 
+ * @param {string[]} stopNodes 
+ * @param {string} jPath
+ * @param {string} currentTagName 
+ */
+function isItStopNode(stopNodes, jPath, currentTagName){
+  const allNodesExp = "*." + currentTagName;
+  for (const stopNodePath in stopNodes) {
+    const stopNodeExp = stopNodes[stopNodePath];
+    if( allNodesExp === stopNodeExp || jPath === stopNodeExp  ) return true;
+  }
+  return false;
+}
+
+/**
+ * Returns the tag Expression and where it is ending handling single-double quotes situation
+ * @param {string} xmlData 
+ * @param {number} i starting index
+ * @returns 
+ */
+function tagExpWithClosingIndex(xmlData, i, closingChar = ">"){
+  let attrBoundary;
+  let tagExp = "";
+  for (let index = i; index < xmlData.length; index++) {
+    let ch = xmlData[index];
+    if (attrBoundary) {
+        if (ch === attrBoundary) attrBoundary = "";//reset
+    } else if (ch === '"' || ch === "'") {
+        attrBoundary = ch;
+    } else if (ch === closingChar[0]) {
+      if(closingChar[1]){
+        if(xmlData[index + 1] === closingChar[1]){
+          return {
+            data: tagExp,
+            index: index
+          }
+        }
+      }else{
+        return {
+          data: tagExp,
+          index: index
+        }
+      }
+    } else if (ch === '\t') {
+      ch = " "
+    }
+    tagExp += ch;
+  }
+}
+
+function findClosingIndex(xmlData, str, i, errMsg){
+  const closingIndex = xmlData.indexOf(str, i);
+  if(closingIndex === -1){
+    throw new Error(errMsg)
+  }else{
+    return closingIndex + str.length - 1;
+  }
+}
+
+function readTagExp(xmlData,i, removeNSPrefix, closingChar = ">"){
+  const result = tagExpWithClosingIndex(xmlData, i+1, closingChar);
+  if(!result) return;
+  let tagExp = result.data;
+  const closeIndex = result.index;
+  const separatorIndex = tagExp.search(/\s/);
+  let tagName = tagExp;
+  let attrExpPresent = true;
+  if(separatorIndex !== -1){//separate tag name and attributes expression
+    tagName = tagExp.substring(0, separatorIndex);
+    tagExp = tagExp.substring(separatorIndex + 1).trimStart();
+  }
+
+  const rawTagName = tagName;
+  if(removeNSPrefix){
+    const colonIndex = tagName.indexOf(":");
+    if(colonIndex !== -1){
+      tagName = tagName.substr(colonIndex+1);
+      attrExpPresent = tagName !== result.data.substr(colonIndex + 1);
+    }
+  }
+
+  return {
+    tagName: tagName,
+    tagExp: tagExp,
+    closeIndex: closeIndex,
+    attrExpPresent: attrExpPresent,
+    rawTagName: rawTagName,
+  }
+}
+/**
+ * find paired tag for a stop node
+ * @param {string} xmlData 
+ * @param {string} tagName 
+ * @param {number} i 
+ */
+function readStopNodeData(xmlData, tagName, i){
+  const startIndex = i;
+  // Starting at 1 since we already have an open tag
+  let openTagCount = 1;
+
+  for (; i < xmlData.length; i++) {
+    if( xmlData[i] === "<"){ 
+      if (xmlData[i+1] === "/") {//close tag
+          const closeIndex = findClosingIndex(xmlData, ">", i, `${tagName} is not closed`);
+          let closeTagName = xmlData.substring(i+2,closeIndex).trim();
+          if(closeTagName === tagName){
+            openTagCount--;
+            if (openTagCount === 0) {
+              return {
+                tagContent: xmlData.substring(startIndex, i),
+                i : closeIndex
+              }
+            }
+          }
+          i=closeIndex;
+        } else if(xmlData[i+1] === '?') { 
+          const closeIndex = findClosingIndex(xmlData, "?>", i+1, "StopNode is not closed.")
+          i=closeIndex;
+        } else if(xmlData.substr(i + 1, 3) === '!--') { 
+          const closeIndex = findClosingIndex(xmlData, "-->", i+3, "StopNode is not closed.")
+          i=closeIndex;
+        } else if(xmlData.substr(i + 1, 2) === '![') { 
+          const closeIndex = findClosingIndex(xmlData, "]]>", i, "StopNode is not closed.") - 2;
+          i=closeIndex;
+        } else {
+          const tagData = readTagExp(xmlData, i, '>')
+
+          if (tagData) {
+            const openTagName = tagData && tagData.tagName;
+            if (openTagName === tagName && tagData.tagExp[tagData.tagExp.length-1] !== "/") {
+              openTagCount++;
+            }
+            i=tagData.closeIndex;
+          }
+        }
+      }
+  }//end for loop
+}
+
+function parseValue(val, shouldParse, options) {
+  if (shouldParse && typeof val === 'string') {
+    //console.log(options)
+    const newval = val.trim();
+    if(newval === 'true' ) return true;
+    else if(newval === 'false' ) return false;
+    else return toNumber(val, options);
+  } else {
+    if (util.isExist(val)) {
+      return val;
+    } else {
+      return '';
+    }
+  }
+}
+
+
+module.exports = OrderedObjParser;
+
+
+/***/ }),
+
+/***/ 9844:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { buildOptions} = __nccwpck_require__(4769);
+const OrderedObjParser = __nccwpck_require__(3017);
+const { prettify} = __nccwpck_require__(7594);
+const validator = __nccwpck_require__(9433);
+
+class XMLParser{
+    
+    constructor(options){
+        this.externalEntities = {};
+        this.options = buildOptions(options);
+        
+    }
+    /**
+     * Parse XML dats to JS object 
+     * @param {string|Buffer} xmlData 
+     * @param {boolean|Object} validationOption 
+     */
+    parse(xmlData,validationOption){
+        if(typeof xmlData === "string"){
+        }else if( xmlData.toString){
+            xmlData = xmlData.toString();
+        }else{
+            throw new Error("XML data is accepted in String or Bytes[] form.")
+        }
+        if( validationOption){
+            if(validationOption === true) validationOption = {}; //validate with default options
+            
+            const result = validator.validate(xmlData, validationOption);
+            if (result !== true) {
+              throw Error( `${result.err.msg}:${result.err.line}:${result.err.col}` )
+            }
+          }
+        const orderedObjParser = new OrderedObjParser(this.options);
+        orderedObjParser.addExternalEntities(this.externalEntities);
+        const orderedResult = orderedObjParser.parseXml(xmlData);
+        if(this.options.preserveOrder || orderedResult === undefined) return orderedResult;
+        else return prettify(orderedResult, this.options);
+    }
+
+    /**
+     * Add Entity which is not by default supported by this library
+     * @param {string} key 
+     * @param {string} value 
+     */
+    addEntity(key, value){
+        if(value.indexOf("&") !== -1){
+            throw new Error("Entity value can't have '&'")
+        }else if(key.indexOf("&") !== -1 || key.indexOf(";") !== -1){
+            throw new Error("An entity must be set without '&' and ';'. Eg. use '#xD' for '&#xD;'")
+        }else if(value === "&"){
+            throw new Error("An entity with value '&' is not permitted");
+        }else{
+            this.externalEntities[key] = value;
+        }
+    }
+}
+
+module.exports = XMLParser;
+
+/***/ }),
+
+/***/ 7594:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+/**
+ * 
+ * @param {array} node 
+ * @param {any} options 
+ * @returns 
+ */
+function prettify(node, options){
+  return compress( node, options);
+}
+
+/**
+ * 
+ * @param {array} arr 
+ * @param {object} options 
+ * @param {string} jPath 
+ * @returns object
+ */
+function compress(arr, options, jPath){
+  let text;
+  const compressedObj = {};
+  for (let i = 0; i < arr.length; i++) {
+    const tagObj = arr[i];
+    const property = propName(tagObj);
+    let newJpath = "";
+    if(jPath === undefined) newJpath = property;
+    else newJpath = jPath + "." + property;
+
+    if(property === options.textNodeName){
+      if(text === undefined) text = tagObj[property];
+      else text += "" + tagObj[property];
+    }else if(property === undefined){
+      continue;
+    }else if(tagObj[property]){
+      
+      let val = compress(tagObj[property], options, newJpath);
+      const isLeaf = isLeafTag(val, options);
+
+      if(tagObj[":@"]){
+        assignAttributes( val, tagObj[":@"], newJpath, options);
+      }else if(Object.keys(val).length === 1 && val[options.textNodeName] !== undefined && !options.alwaysCreateTextNode){
+        val = val[options.textNodeName];
+      }else if(Object.keys(val).length === 0){
+        if(options.alwaysCreateTextNode) val[options.textNodeName] = "";
+        else val = "";
+      }
+
+      if(compressedObj[property] !== undefined && compressedObj.hasOwnProperty(property)) {
+        if(!Array.isArray(compressedObj[property])) {
+            compressedObj[property] = [ compressedObj[property] ];
+        }
+        compressedObj[property].push(val);
+      }else{
+        //TODO: if a node is not an array, then check if it should be an array
+        //also determine if it is a leaf node
+        if (options.isArray(property, newJpath, isLeaf )) {
+          compressedObj[property] = [val];
+        }else{
+          compressedObj[property] = val;
+        }
+      }
+    }
+    
+  }
+  // if(text && text.length > 0) compressedObj[options.textNodeName] = text;
+  if(typeof text === "string"){
+    if(text.length > 0) compressedObj[options.textNodeName] = text;
+  }else if(text !== undefined) compressedObj[options.textNodeName] = text;
+  return compressedObj;
+}
+
+function propName(obj){
+  const keys = Object.keys(obj);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if(key !== ":@") return key;
+  }
+}
+
+function assignAttributes(obj, attrMap, jpath, options){
+  if (attrMap) {
+    const keys = Object.keys(attrMap);
+    const len = keys.length; //don't make it inline
+    for (let i = 0; i < len; i++) {
+      const atrrName = keys[i];
+      if (options.isArray(atrrName, jpath + "." + atrrName, true, true)) {
+        obj[atrrName] = [ attrMap[atrrName] ];
+      } else {
+        obj[atrrName] = attrMap[atrrName];
+      }
+    }
+  }
+}
+
+function isLeafTag(obj, options){
+  const { textNodeName } = options;
+  const propCount = Object.keys(obj).length;
+  
+  if (propCount === 0) {
+    return true;
+  }
+
+  if (
+    propCount === 1 &&
+    (obj[textNodeName] || typeof obj[textNodeName] === "boolean" || obj[textNodeName] === 0)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+exports.prettify = prettify;
+
+
+/***/ }),
+
+/***/ 9307:
+/***/ ((module) => {
+
+"use strict";
+
+
+class XmlNode{
+  constructor(tagname) {
+    this.tagname = tagname;
+    this.child = []; //nested tags, text, cdata, comments in order
+    this[":@"] = {}; //attributes map
+  }
+  add(key,val){
+    // this.child.push( {name : key, val: val, isCdata: isCdata });
+    if(key === "__proto__") key = "#__proto__";
+    this.child.push( {[key]: val });
+  }
+  addChild(node) {
+    if(node.tagname === "__proto__") node.tagname = "#__proto__";
+    if(node[":@"] && Object.keys(node[":@"]).length > 0){
+      this.child.push( { [node.tagname]: node.child, [":@"]: node[":@"] });
+    }else{
+      this.child.push( { [node.tagname]: node.child });
+    }
+  };
+};
+
+
+module.exports = XmlNode;
+
+/***/ }),
+
+/***/ 4778:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var debug;
+
+module.exports = function () {
+  if (!debug) {
+    try {
+      /* eslint global-require: off */
+      debug = __nccwpck_require__(2830)("follow-redirects");
+    }
+    catch (error) { /* */ }
+    if (typeof debug !== "function") {
+      debug = function () { /* */ };
+    }
+  }
+  debug.apply(null, arguments);
+};
+
+
+/***/ }),
+
+/***/ 1573:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var url = __nccwpck_require__(7016);
+var URL = url.URL;
+var http = __nccwpck_require__(8611);
+var https = __nccwpck_require__(5692);
+var Writable = (__nccwpck_require__(2203).Writable);
+var assert = __nccwpck_require__(2613);
+var debug = __nccwpck_require__(4778);
+
+// Preventive platform detection
+// istanbul ignore next
+(function detectUnsupportedEnvironment() {
+  var looksLikeNode = typeof process !== "undefined";
+  var looksLikeBrowser = typeof window !== "undefined" && typeof document !== "undefined";
+  var looksLikeV8 = isFunction(Error.captureStackTrace);
+  if (!looksLikeNode && (looksLikeBrowser || !looksLikeV8)) {
+    console.warn("The follow-redirects package should be excluded from browser builds.");
+  }
+}());
+
+// Whether to use the native URL object or the legacy url module
+var useNativeURL = false;
+try {
+  assert(new URL(""));
+}
+catch (error) {
+  useNativeURL = error.code === "ERR_INVALID_URL";
+}
+
+// URL fields to preserve in copy operations
+var preservedUrlFields = [
+  "auth",
+  "host",
+  "hostname",
+  "href",
+  "path",
+  "pathname",
+  "port",
+  "protocol",
+  "query",
+  "search",
+  "hash",
+];
+
+// Create handlers that pass events from native requests
+var events = ["abort", "aborted", "connect", "error", "socket", "timeout"];
+var eventHandlers = Object.create(null);
+events.forEach(function (event) {
+  eventHandlers[event] = function (arg1, arg2, arg3) {
+    this._redirectable.emit(event, arg1, arg2, arg3);
+  };
+});
+
+// Error types with codes
+var InvalidUrlError = createErrorType(
+  "ERR_INVALID_URL",
+  "Invalid URL",
+  TypeError
+);
+var RedirectionError = createErrorType(
+  "ERR_FR_REDIRECTION_FAILURE",
+  "Redirected request failed"
+);
+var TooManyRedirectsError = createErrorType(
+  "ERR_FR_TOO_MANY_REDIRECTS",
+  "Maximum number of redirects exceeded",
+  RedirectionError
+);
+var MaxBodyLengthExceededError = createErrorType(
+  "ERR_FR_MAX_BODY_LENGTH_EXCEEDED",
+  "Request body larger than maxBodyLength limit"
+);
+var WriteAfterEndError = createErrorType(
+  "ERR_STREAM_WRITE_AFTER_END",
+  "write after end"
+);
+
+// istanbul ignore next
+var destroy = Writable.prototype.destroy || noop;
+
+// An HTTP(S) request that can be redirected
+function RedirectableRequest(options, responseCallback) {
+  // Initialize the request
+  Writable.call(this);
+  this._sanitizeOptions(options);
+  this._options = options;
+  this._ended = false;
+  this._ending = false;
+  this._redirectCount = 0;
+  this._redirects = [];
+  this._requestBodyLength = 0;
+  this._requestBodyBuffers = [];
+
+  // Attach a callback if passed
+  if (responseCallback) {
+    this.on("response", responseCallback);
+  }
+
+  // React to responses of native requests
+  var self = this;
+  this._onNativeResponse = function (response) {
+    try {
+      self._processResponse(response);
+    }
+    catch (cause) {
+      self.emit("error", cause instanceof RedirectionError ?
+        cause : new RedirectionError({ cause: cause }));
+    }
+  };
+
+  // Perform the first request
+  this._performRequest();
+}
+RedirectableRequest.prototype = Object.create(Writable.prototype);
+
+RedirectableRequest.prototype.abort = function () {
+  destroyRequest(this._currentRequest);
+  this._currentRequest.abort();
+  this.emit("abort");
+};
+
+RedirectableRequest.prototype.destroy = function (error) {
+  destroyRequest(this._currentRequest, error);
+  destroy.call(this, error);
+  return this;
+};
+
+// Writes buffered data to the current native request
+RedirectableRequest.prototype.write = function (data, encoding, callback) {
+  // Writing is not allowed if end has been called
+  if (this._ending) {
+    throw new WriteAfterEndError();
+  }
+
+  // Validate input and shift parameters if necessary
+  if (!isString(data) && !isBuffer(data)) {
+    throw new TypeError("data should be a string, Buffer or Uint8Array");
+  }
+  if (isFunction(encoding)) {
+    callback = encoding;
+    encoding = null;
+  }
+
+  // Ignore empty buffers, since writing them doesn't invoke the callback
+  // https://github.com/nodejs/node/issues/22066
+  if (data.length === 0) {
+    if (callback) {
+      callback();
+    }
+    return;
+  }
+  // Only write when we don't exceed the maximum body length
+  if (this._requestBodyLength + data.length <= this._options.maxBodyLength) {
+    this._requestBodyLength += data.length;
+    this._requestBodyBuffers.push({ data: data, encoding: encoding });
+    this._currentRequest.write(data, encoding, callback);
+  }
+  // Error when we exceed the maximum body length
+  else {
+    this.emit("error", new MaxBodyLengthExceededError());
+    this.abort();
+  }
+};
+
+// Ends the current native request
+RedirectableRequest.prototype.end = function (data, encoding, callback) {
+  // Shift parameters if necessary
+  if (isFunction(data)) {
+    callback = data;
+    data = encoding = null;
+  }
+  else if (isFunction(encoding)) {
+    callback = encoding;
+    encoding = null;
+  }
+
+  // Write data if needed and end
+  if (!data) {
+    this._ended = this._ending = true;
+    this._currentRequest.end(null, null, callback);
+  }
+  else {
+    var self = this;
+    var currentRequest = this._currentRequest;
+    this.write(data, encoding, function () {
+      self._ended = true;
+      currentRequest.end(null, null, callback);
+    });
+    this._ending = true;
+  }
+};
+
+// Sets a header value on the current native request
+RedirectableRequest.prototype.setHeader = function (name, value) {
+  this._options.headers[name] = value;
+  this._currentRequest.setHeader(name, value);
+};
+
+// Clears a header value on the current native request
+RedirectableRequest.prototype.removeHeader = function (name) {
+  delete this._options.headers[name];
+  this._currentRequest.removeHeader(name);
+};
+
+// Global timeout for all underlying requests
+RedirectableRequest.prototype.setTimeout = function (msecs, callback) {
+  var self = this;
+
+  // Destroys the socket on timeout
+  function destroyOnTimeout(socket) {
+    socket.setTimeout(msecs);
+    socket.removeListener("timeout", socket.destroy);
+    socket.addListener("timeout", socket.destroy);
+  }
+
+  // Sets up a timer to trigger a timeout event
+  function startTimer(socket) {
+    if (self._timeout) {
+      clearTimeout(self._timeout);
+    }
+    self._timeout = setTimeout(function () {
+      self.emit("timeout");
+      clearTimer();
+    }, msecs);
+    destroyOnTimeout(socket);
+  }
+
+  // Stops a timeout from triggering
+  function clearTimer() {
+    // Clear the timeout
+    if (self._timeout) {
+      clearTimeout(self._timeout);
+      self._timeout = null;
+    }
+
+    // Clean up all attached listeners
+    self.removeListener("abort", clearTimer);
+    self.removeListener("error", clearTimer);
+    self.removeListener("response", clearTimer);
+    self.removeListener("close", clearTimer);
+    if (callback) {
+      self.removeListener("timeout", callback);
+    }
+    if (!self.socket) {
+      self._currentRequest.removeListener("socket", startTimer);
+    }
+  }
+
+  // Attach callback if passed
+  if (callback) {
+    this.on("timeout", callback);
+  }
+
+  // Start the timer if or when the socket is opened
+  if (this.socket) {
+    startTimer(this.socket);
+  }
+  else {
+    this._currentRequest.once("socket", startTimer);
+  }
+
+  // Clean up on events
+  this.on("socket", destroyOnTimeout);
+  this.on("abort", clearTimer);
+  this.on("error", clearTimer);
+  this.on("response", clearTimer);
+  this.on("close", clearTimer);
+
+  return this;
+};
+
+// Proxy all other public ClientRequest methods
+[
+  "flushHeaders", "getHeader",
+  "setNoDelay", "setSocketKeepAlive",
+].forEach(function (method) {
+  RedirectableRequest.prototype[method] = function (a, b) {
+    return this._currentRequest[method](a, b);
+  };
+});
+
+// Proxy all public ClientRequest properties
+["aborted", "connection", "socket"].forEach(function (property) {
+  Object.defineProperty(RedirectableRequest.prototype, property, {
+    get: function () { return this._currentRequest[property]; },
+  });
+});
+
+RedirectableRequest.prototype._sanitizeOptions = function (options) {
+  // Ensure headers are always present
+  if (!options.headers) {
+    options.headers = {};
+  }
+
+  // Since http.request treats host as an alias of hostname,
+  // but the url module interprets host as hostname plus port,
+  // eliminate the host property to avoid confusion.
+  if (options.host) {
+    // Use hostname if set, because it has precedence
+    if (!options.hostname) {
+      options.hostname = options.host;
+    }
+    delete options.host;
+  }
+
+  // Complete the URL object when necessary
+  if (!options.pathname && options.path) {
+    var searchPos = options.path.indexOf("?");
+    if (searchPos < 0) {
+      options.pathname = options.path;
+    }
+    else {
+      options.pathname = options.path.substring(0, searchPos);
+      options.search = options.path.substring(searchPos);
+    }
+  }
+};
+
+
+// Executes the next native request (initial or redirect)
+RedirectableRequest.prototype._performRequest = function () {
+  // Load the native protocol
+  var protocol = this._options.protocol;
+  var nativeProtocol = this._options.nativeProtocols[protocol];
+  if (!nativeProtocol) {
+    throw new TypeError("Unsupported protocol " + protocol);
+  }
+
+  // If specified, use the agent corresponding to the protocol
+  // (HTTP and HTTPS use different types of agents)
+  if (this._options.agents) {
+    var scheme = protocol.slice(0, -1);
+    this._options.agent = this._options.agents[scheme];
+  }
+
+  // Create the native request and set up its event handlers
+  var request = this._currentRequest =
+        nativeProtocol.request(this._options, this._onNativeResponse);
+  request._redirectable = this;
+  for (var event of events) {
+    request.on(event, eventHandlers[event]);
+  }
+
+  // RFC7230§5.3.1: When making a request directly to an origin server, […]
+  // a client MUST send only the absolute path […] as the request-target.
+  this._currentUrl = /^\//.test(this._options.path) ?
+    url.format(this._options) :
+    // When making a request to a proxy, […]
+    // a client MUST send the target URI in absolute-form […].
+    this._options.path;
+
+  // End a redirected request
+  // (The first request must be ended explicitly with RedirectableRequest#end)
+  if (this._isRedirect) {
+    // Write the request entity and end
+    var i = 0;
+    var self = this;
+    var buffers = this._requestBodyBuffers;
+    (function writeNext(error) {
+      // Only write if this request has not been redirected yet
+      // istanbul ignore else
+      if (request === self._currentRequest) {
+        // Report any write errors
+        // istanbul ignore if
+        if (error) {
+          self.emit("error", error);
+        }
+        // Write the next buffer if there are still left
+        else if (i < buffers.length) {
+          var buffer = buffers[i++];
+          // istanbul ignore else
+          if (!request.finished) {
+            request.write(buffer.data, buffer.encoding, writeNext);
+          }
+        }
+        // End the request if `end` has been called on us
+        else if (self._ended) {
+          request.end();
+        }
+      }
+    }());
+  }
+};
+
+// Processes a response from the current native request
+RedirectableRequest.prototype._processResponse = function (response) {
+  // Store the redirected response
+  var statusCode = response.statusCode;
+  if (this._options.trackRedirects) {
+    this._redirects.push({
+      url: this._currentUrl,
+      headers: response.headers,
+      statusCode: statusCode,
+    });
+  }
+
+  // RFC7231§6.4: The 3xx (Redirection) class of status code indicates
+  // that further action needs to be taken by the user agent in order to
+  // fulfill the request. If a Location header field is provided,
+  // the user agent MAY automatically redirect its request to the URI
+  // referenced by the Location field value,
+  // even if the specific status code is not understood.
+
+  // If the response is not a redirect; return it as-is
+  var location = response.headers.location;
+  if (!location || this._options.followRedirects === false ||
+      statusCode < 300 || statusCode >= 400) {
+    response.responseUrl = this._currentUrl;
+    response.redirects = this._redirects;
+    this.emit("response", response);
+
+    // Clean up
+    this._requestBodyBuffers = [];
+    return;
+  }
+
+  // The response is a redirect, so abort the current request
+  destroyRequest(this._currentRequest);
+  // Discard the remainder of the response to avoid waiting for data
+  response.destroy();
+
+  // RFC7231§6.4: A client SHOULD detect and intervene
+  // in cyclical redirections (i.e., "infinite" redirection loops).
+  if (++this._redirectCount > this._options.maxRedirects) {
+    throw new TooManyRedirectsError();
+  }
+
+  // Store the request headers if applicable
+  var requestHeaders;
+  var beforeRedirect = this._options.beforeRedirect;
+  if (beforeRedirect) {
+    requestHeaders = Object.assign({
+      // The Host header was set by nativeProtocol.request
+      Host: response.req.getHeader("host"),
+    }, this._options.headers);
+  }
+
+  // RFC7231§6.4: Automatic redirection needs to done with
+  // care for methods not known to be safe, […]
+  // RFC7231§6.4.2–3: For historical reasons, a user agent MAY change
+  // the request method from POST to GET for the subsequent request.
+  var method = this._options.method;
+  if ((statusCode === 301 || statusCode === 302) && this._options.method === "POST" ||
+      // RFC7231§6.4.4: The 303 (See Other) status code indicates that
+      // the server is redirecting the user agent to a different resource […]
+      // A user agent can perform a retrieval request targeting that URI
+      // (a GET or HEAD request if using HTTP) […]
+      (statusCode === 303) && !/^(?:GET|HEAD)$/.test(this._options.method)) {
+    this._options.method = "GET";
+    // Drop a possible entity and headers related to it
+    this._requestBodyBuffers = [];
+    removeMatchingHeaders(/^content-/i, this._options.headers);
+  }
+
+  // Drop the Host header, as the redirect might lead to a different host
+  var currentHostHeader = removeMatchingHeaders(/^host$/i, this._options.headers);
+
+  // If the redirect is relative, carry over the host of the last request
+  var currentUrlParts = parseUrl(this._currentUrl);
+  var currentHost = currentHostHeader || currentUrlParts.host;
+  var currentUrl = /^\w+:/.test(location) ? this._currentUrl :
+    url.format(Object.assign(currentUrlParts, { host: currentHost }));
+
+  // Create the redirected request
+  var redirectUrl = resolveUrl(location, currentUrl);
+  debug("redirecting to", redirectUrl.href);
+  this._isRedirect = true;
+  spreadUrlObject(redirectUrl, this._options);
+
+  // Drop confidential headers when redirecting to a less secure protocol
+  // or to a different domain that is not a superdomain
+  if (redirectUrl.protocol !== currentUrlParts.protocol &&
+     redirectUrl.protocol !== "https:" ||
+     redirectUrl.host !== currentHost &&
+     !isSubdomain(redirectUrl.host, currentHost)) {
+    removeMatchingHeaders(/^(?:(?:proxy-)?authorization|cookie)$/i, this._options.headers);
+  }
+
+  // Evaluate the beforeRedirect callback
+  if (isFunction(beforeRedirect)) {
+    var responseDetails = {
+      headers: response.headers,
+      statusCode: statusCode,
+    };
+    var requestDetails = {
+      url: currentUrl,
+      method: method,
+      headers: requestHeaders,
+    };
+    beforeRedirect(this._options, responseDetails, requestDetails);
+    this._sanitizeOptions(this._options);
+  }
+
+  // Perform the redirected request
+  this._performRequest();
+};
+
+// Wraps the key/value object of protocols with redirect functionality
+function wrap(protocols) {
+  // Default settings
+  var exports = {
+    maxRedirects: 21,
+    maxBodyLength: 10 * 1024 * 1024,
+  };
+
+  // Wrap each protocol
+  var nativeProtocols = {};
+  Object.keys(protocols).forEach(function (scheme) {
+    var protocol = scheme + ":";
+    var nativeProtocol = nativeProtocols[protocol] = protocols[scheme];
+    var wrappedProtocol = exports[scheme] = Object.create(nativeProtocol);
+
+    // Executes a request, following redirects
+    function request(input, options, callback) {
+      // Parse parameters, ensuring that input is an object
+      if (isURL(input)) {
+        input = spreadUrlObject(input);
+      }
+      else if (isString(input)) {
+        input = spreadUrlObject(parseUrl(input));
+      }
+      else {
+        callback = options;
+        options = validateUrl(input);
+        input = { protocol: protocol };
+      }
+      if (isFunction(options)) {
+        callback = options;
+        options = null;
+      }
+
+      // Set defaults
+      options = Object.assign({
+        maxRedirects: exports.maxRedirects,
+        maxBodyLength: exports.maxBodyLength,
+      }, input, options);
+      options.nativeProtocols = nativeProtocols;
+      if (!isString(options.host) && !isString(options.hostname)) {
+        options.hostname = "::1";
+      }
+
+      assert.equal(options.protocol, protocol, "protocol mismatch");
+      debug("options", options);
+      return new RedirectableRequest(options, callback);
+    }
+
+    // Executes a GET request, following redirects
+    function get(input, options, callback) {
+      var wrappedRequest = wrappedProtocol.request(input, options, callback);
+      wrappedRequest.end();
+      return wrappedRequest;
+    }
+
+    // Expose the properties on the wrapped protocol
+    Object.defineProperties(wrappedProtocol, {
+      request: { value: request, configurable: true, enumerable: true, writable: true },
+      get: { value: get, configurable: true, enumerable: true, writable: true },
+    });
+  });
+  return exports;
+}
+
+function noop() { /* empty */ }
+
+function parseUrl(input) {
+  var parsed;
+  // istanbul ignore else
+  if (useNativeURL) {
+    parsed = new URL(input);
+  }
+  else {
+    // Ensure the URL is valid and absolute
+    parsed = validateUrl(url.parse(input));
+    if (!isString(parsed.protocol)) {
+      throw new InvalidUrlError({ input });
+    }
+  }
+  return parsed;
+}
+
+function resolveUrl(relative, base) {
+  // istanbul ignore next
+  return useNativeURL ? new URL(relative, base) : parseUrl(url.resolve(base, relative));
+}
+
+function validateUrl(input) {
+  if (/^\[/.test(input.hostname) && !/^\[[:0-9a-f]+\]$/i.test(input.hostname)) {
+    throw new InvalidUrlError({ input: input.href || input });
+  }
+  if (/^\[/.test(input.host) && !/^\[[:0-9a-f]+\](:\d+)?$/i.test(input.host)) {
+    throw new InvalidUrlError({ input: input.href || input });
+  }
+  return input;
+}
+
+function spreadUrlObject(urlObject, target) {
+  var spread = target || {};
+  for (var key of preservedUrlFields) {
+    spread[key] = urlObject[key];
+  }
+
+  // Fix IPv6 hostname
+  if (spread.hostname.startsWith("[")) {
+    spread.hostname = spread.hostname.slice(1, -1);
+  }
+  // Ensure port is a number
+  if (spread.port !== "") {
+    spread.port = Number(spread.port);
+  }
+  // Concatenate path
+  spread.path = spread.search ? spread.pathname + spread.search : spread.pathname;
+
+  return spread;
+}
+
+function removeMatchingHeaders(regex, headers) {
+  var lastValue;
+  for (var header in headers) {
+    if (regex.test(header)) {
+      lastValue = headers[header];
+      delete headers[header];
+    }
+  }
+  return (lastValue === null || typeof lastValue === "undefined") ?
+    undefined : String(lastValue).trim();
+}
+
+function createErrorType(code, message, baseClass) {
+  // Create constructor
+  function CustomError(properties) {
+    // istanbul ignore else
+    if (isFunction(Error.captureStackTrace)) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+    Object.assign(this, properties || {});
+    this.code = code;
+    this.message = this.cause ? message + ": " + this.cause.message : message;
+  }
+
+  // Attach constructor and set default properties
+  CustomError.prototype = new (baseClass || Error)();
+  Object.defineProperties(CustomError.prototype, {
+    constructor: {
+      value: CustomError,
+      enumerable: false,
+    },
+    name: {
+      value: "Error [" + code + "]",
+      enumerable: false,
+    },
+  });
+  return CustomError;
+}
+
+function destroyRequest(request, error) {
+  for (var event of events) {
+    request.removeListener(event, eventHandlers[event]);
+  }
+  request.on("error", noop);
+  request.destroy(error);
+}
+
+function isSubdomain(subdomain, domain) {
+  assert(isString(subdomain) && isString(domain));
+  var dot = subdomain.length - domain.length - 1;
+  return dot > 0 && subdomain[dot] === "." && subdomain.endsWith(domain);
+}
+
+function isString(value) {
+  return typeof value === "string" || value instanceof String;
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isBuffer(value) {
+  return typeof value === "object" && ("length" in value);
+}
+
+function isURL(value) {
+  return URL && value instanceof URL;
+}
+
+// Exports
+module.exports = wrap({ http: http, https: https });
+module.exports.wrap = wrap;
+
+
+/***/ }),
+
+/***/ 421:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var CombinedStream = __nccwpck_require__(5630);
+var util = __nccwpck_require__(9023);
+var path = __nccwpck_require__(6928);
+var http = __nccwpck_require__(8611);
+var https = __nccwpck_require__(5692);
+var parseUrl = (__nccwpck_require__(7016).parse);
+var fs = __nccwpck_require__(9896);
+var Stream = (__nccwpck_require__(2203).Stream);
+var mime = __nccwpck_require__(2794);
+var asynckit = __nccwpck_require__(1324);
+var populate = __nccwpck_require__(6211);
+
+// Public API
+module.exports = FormData;
+
+// make it a Stream
+util.inherits(FormData, CombinedStream);
+
+/**
+ * Create readable "multipart/form-data" streams.
+ * Can be used to submit forms
+ * and file uploads to other web applications.
+ *
+ * @constructor
+ * @param {Object} options - Properties to be added/overriden for FormData and CombinedStream
+ */
+function FormData(options) {
+  if (!(this instanceof FormData)) {
+    return new FormData(options);
+  }
+
+  this._overheadLength = 0;
+  this._valueLength = 0;
+  this._valuesToMeasure = [];
+
+  CombinedStream.call(this);
+
+  options = options || {};
+  for (var option in options) {
+    this[option] = options[option];
+  }
+}
+
+FormData.LINE_BREAK = '\r\n';
+FormData.DEFAULT_CONTENT_TYPE = 'application/octet-stream';
+
+FormData.prototype.append = function(field, value, options) {
+
+  options = options || {};
+
+  // allow filename as single option
+  if (typeof options == 'string') {
+    options = {filename: options};
+  }
+
+  var append = CombinedStream.prototype.append.bind(this);
+
+  // all that streamy business can't handle numbers
+  if (typeof value == 'number') {
+    value = '' + value;
+  }
+
+  // https://github.com/felixge/node-form-data/issues/38
+  if (util.isArray(value)) {
+    // Please convert your array into string
+    // the way web server expects it
+    this._error(new Error('Arrays are not supported.'));
+    return;
+  }
+
+  var header = this._multiPartHeader(field, value, options);
+  var footer = this._multiPartFooter();
+
+  append(header);
+  append(value);
+  append(footer);
+
+  // pass along options.knownLength
+  this._trackLength(header, value, options);
+};
+
+FormData.prototype._trackLength = function(header, value, options) {
+  var valueLength = 0;
+
+  // used w/ getLengthSync(), when length is known.
+  // e.g. for streaming directly from a remote server,
+  // w/ a known file a size, and not wanting to wait for
+  // incoming file to finish to get its size.
+  if (options.knownLength != null) {
+    valueLength += +options.knownLength;
+  } else if (Buffer.isBuffer(value)) {
+    valueLength = value.length;
+  } else if (typeof value === 'string') {
+    valueLength = Buffer.byteLength(value);
+  }
+
+  this._valueLength += valueLength;
+
+  // @check why add CRLF? does this account for custom/multiple CRLFs?
+  this._overheadLength +=
+    Buffer.byteLength(header) +
+    FormData.LINE_BREAK.length;
+
+  // empty or either doesn't have path or not an http response or not a stream
+  if (!value || ( !value.path && !(value.readable && value.hasOwnProperty('httpVersion')) && !(value instanceof Stream))) {
+    return;
+  }
+
+  // no need to bother with the length
+  if (!options.knownLength) {
+    this._valuesToMeasure.push(value);
+  }
+};
+
+FormData.prototype._lengthRetriever = function(value, callback) {
+
+  if (value.hasOwnProperty('fd')) {
+
+    // take read range into a account
+    // `end` = Infinity –> read file till the end
+    //
+    // TODO: Looks like there is bug in Node fs.createReadStream
+    // it doesn't respect `end` options without `start` options
+    // Fix it when node fixes it.
+    // https://github.com/joyent/node/issues/7819
+    if (value.end != undefined && value.end != Infinity && value.start != undefined) {
+
+      // when end specified
+      // no need to calculate range
+      // inclusive, starts with 0
+      callback(null, value.end + 1 - (value.start ? value.start : 0));
+
+    // not that fast snoopy
+    } else {
+      // still need to fetch file size from fs
+      fs.stat(value.path, function(err, stat) {
+
+        var fileSize;
+
+        if (err) {
+          callback(err);
+          return;
+        }
+
+        // update final size based on the range options
+        fileSize = stat.size - (value.start ? value.start : 0);
+        callback(null, fileSize);
+      });
+    }
+
+  // or http response
+  } else if (value.hasOwnProperty('httpVersion')) {
+    callback(null, +value.headers['content-length']);
+
+  // or request stream http://github.com/mikeal/request
+  } else if (value.hasOwnProperty('httpModule')) {
+    // wait till response come back
+    value.on('response', function(response) {
+      value.pause();
+      callback(null, +response.headers['content-length']);
+    });
+    value.resume();
+
+  // something else
+  } else {
+    callback('Unknown stream');
+  }
+};
+
+FormData.prototype._multiPartHeader = function(field, value, options) {
+  // custom header specified (as string)?
+  // it becomes responsible for boundary
+  // (e.g. to handle extra CRLFs on .NET servers)
+  if (typeof options.header == 'string') {
+    return options.header;
+  }
+
+  var contentDisposition = this._getContentDisposition(value, options);
+  var contentType = this._getContentType(value, options);
+
+  var contents = '';
+  var headers  = {
+    // add custom disposition as third element or keep it two elements if not
+    'Content-Disposition': ['form-data', 'name="' + field + '"'].concat(contentDisposition || []),
+    // if no content type. allow it to be empty array
+    'Content-Type': [].concat(contentType || [])
+  };
+
+  // allow custom headers.
+  if (typeof options.header == 'object') {
+    populate(headers, options.header);
+  }
+
+  var header;
+  for (var prop in headers) {
+    if (!headers.hasOwnProperty(prop)) continue;
+    header = headers[prop];
+
+    // skip nullish headers.
+    if (header == null) {
+      continue;
+    }
+
+    // convert all headers to arrays.
+    if (!Array.isArray(header)) {
+      header = [header];
+    }
+
+    // add non-empty headers.
+    if (header.length) {
+      contents += prop + ': ' + header.join('; ') + FormData.LINE_BREAK;
+    }
+  }
+
+  return '--' + this.getBoundary() + FormData.LINE_BREAK + contents + FormData.LINE_BREAK;
+};
+
+FormData.prototype._getContentDisposition = function(value, options) {
+
+  var filename
+    , contentDisposition
+    ;
+
+  if (typeof options.filepath === 'string') {
+    // custom filepath for relative paths
+    filename = path.normalize(options.filepath).replace(/\\/g, '/');
+  } else if (options.filename || value.name || value.path) {
+    // custom filename take precedence
+    // formidable and the browser add a name property
+    // fs- and request- streams have path property
+    filename = path.basename(options.filename || value.name || value.path);
+  } else if (value.readable && value.hasOwnProperty('httpVersion')) {
+    // or try http response
+    filename = path.basename(value.client._httpMessage.path || '');
+  }
+
+  if (filename) {
+    contentDisposition = 'filename="' + filename + '"';
+  }
+
+  return contentDisposition;
+};
+
+FormData.prototype._getContentType = function(value, options) {
+
+  // use custom content-type above all
+  var contentType = options.contentType;
+
+  // or try `name` from formidable, browser
+  if (!contentType && value.name) {
+    contentType = getType(value.name);
+  }
+
+  // or try `path` from fs-, request- streams
+  if (!contentType && value.path) {
+    contentType = getType(value.path);
+  }
+
+  // or if it's http-reponse
+  if (!contentType && value.readable && value.hasOwnProperty('httpVersion')) {
+    contentType = value.headers['content-type'];
+  }
+
+  // or guess it from the filepath or filename
+  if (!contentType && (options.filepath || options.filename)) {
+    contentType = getType(options.filepath || options.filename);
+  }
+
+  // fallback to the default content type if `value` is not simple value
+  if (!contentType && typeof value == 'object') {
+    contentType = FormData.DEFAULT_CONTENT_TYPE;
+  }
+
+  return contentType;
+};
+
+FormData.prototype._multiPartFooter = function() {
+  return function(next) {
+    var footer = FormData.LINE_BREAK;
+
+    var lastPart = (this._streams.length === 0);
+    if (lastPart) {
+      footer += this._lastBoundary();
+    }
+
+    next(footer);
+  }.bind(this);
+};
+
+FormData.prototype._lastBoundary = function() {
+  return '--' + this.getBoundary() + '--' + FormData.LINE_BREAK;
+};
+
+FormData.prototype.getHeaders = function(userHeaders) {
+  var header;
+  var formHeaders = {
+    'content-type': 'multipart/form-data; boundary=' + this.getBoundary()
+  };
+
+  for (header in userHeaders) {
+    if (userHeaders.hasOwnProperty(header)) {
+      formHeaders[header.toLowerCase()] = userHeaders[header];
+    }
+  }
+
+  return formHeaders;
+};
+
+FormData.prototype.setBoundary = function(boundary) {
+  this._boundary = boundary;
+};
+
+FormData.prototype.getBoundary = function() {
+  if (!this._boundary) {
+    this._generateBoundary();
+  }
+
+  return this._boundary;
+};
+
+FormData.prototype.getBuffer = function() {
+  var dataBuffer = new Buffer.alloc( 0 );
+  var boundary = this.getBoundary();
+
+  // Create the form content. Add Line breaks to the end of data.
+  for (var i = 0, len = this._streams.length; i < len; i++) {
+    if (typeof this._streams[i] !== 'function') {
+
+      // Add content to the buffer.
+      if(Buffer.isBuffer(this._streams[i])) {
+        dataBuffer = Buffer.concat( [dataBuffer, this._streams[i]]);
+      }else {
+        dataBuffer = Buffer.concat( [dataBuffer, Buffer.from(this._streams[i])]);
+      }
+
+      // Add break after content.
+      if (typeof this._streams[i] !== 'string' || this._streams[i].substring( 2, boundary.length + 2 ) !== boundary) {
+        dataBuffer = Buffer.concat( [dataBuffer, Buffer.from(FormData.LINE_BREAK)] );
+      }
+    }
+  }
+
+  // Add the footer and return the Buffer object.
+  return Buffer.concat( [dataBuffer, Buffer.from(this._lastBoundary())] );
+};
+
+FormData.prototype._generateBoundary = function() {
+  // This generates a 50 character boundary similar to those used by Firefox.
+  // They are optimized for boyer-moore parsing.
+  var boundary = '--------------------------';
+  for (var i = 0; i < 24; i++) {
+    boundary += Math.floor(Math.random() * 10).toString(16);
+  }
+
+  this._boundary = boundary;
+};
+
+// Note: getLengthSync DOESN'T calculate streams length
+// As workaround one can calculate file size manually
+// and add it as knownLength option
+FormData.prototype.getLengthSync = function() {
+  var knownLength = this._overheadLength + this._valueLength;
+
+  // Don't get confused, there are 3 "internal" streams for each keyval pair
+  // so it basically checks if there is any value added to the form
+  if (this._streams.length) {
+    knownLength += this._lastBoundary().length;
+  }
+
+  // https://github.com/form-data/form-data/issues/40
+  if (!this.hasKnownLength()) {
+    // Some async length retrievers are present
+    // therefore synchronous length calculation is false.
+    // Please use getLength(callback) to get proper length
+    this._error(new Error('Cannot calculate proper length in synchronous way.'));
+  }
+
+  return knownLength;
+};
+
+// Public API to check if length of added values is known
+// https://github.com/form-data/form-data/issues/196
+// https://github.com/form-data/form-data/issues/262
+FormData.prototype.hasKnownLength = function() {
+  var hasKnownLength = true;
+
+  if (this._valuesToMeasure.length) {
+    hasKnownLength = false;
+  }
+
+  return hasKnownLength;
+};
+
+FormData.prototype.getLength = function(cb) {
+  var knownLength = this._overheadLength + this._valueLength;
+
+  if (this._streams.length) {
+    knownLength += this._lastBoundary().length;
+  }
+
+  if (!this._valuesToMeasure.length) {
+    process.nextTick(cb.bind(this, null, knownLength));
+    return;
+  }
+
+  asynckit.parallel(this._valuesToMeasure, this._lengthRetriever, function(err, values) {
+    if (err) {
+      cb(err);
+      return;
+    }
+
+    values.forEach(function(length) {
+      knownLength += length;
+    });
+
+    cb(null, knownLength);
+  });
+};
+
+FormData.prototype.submit = function(params, cb) {
+  var request
+    , options
+    , defaults = {method: 'post'}
+    ;
+
+  // parse provided url if it's string
+  // or treat it as options object
+  if (typeof params == 'string') {
+
+    params = parseUrl(params);
+    options = populate({
+      port: params.port,
+      path: params.pathname,
+      host: params.hostname,
+      protocol: params.protocol
+    }, defaults);
+
+  // use custom params
+  } else {
+
+    options = populate(params, defaults);
+    // if no port provided use default one
+    if (!options.port) {
+      options.port = options.protocol == 'https:' ? 443 : 80;
+    }
+  }
+
+  // put that good code in getHeaders to some use
+  options.headers = this.getHeaders(params.headers);
+
+  // https if specified, fallback to http in any other case
+  if (options.protocol == 'https:') {
+    request = https.request(options);
+  } else {
+    request = http.request(options);
+  }
+
+  // get content length and fire away
+  this.getLength(function(err, length) {
+    if (err && err !== 'Unknown stream') {
+      this._error(err);
+      return;
+    }
+
+    // add content length
+    if (length) {
+      request.setHeader('Content-Length', length);
+    }
+
+    this.pipe(request);
+    if (cb) {
+      var onResponse;
+
+      var callback = function (error, responce) {
+        request.removeListener('error', callback);
+        request.removeListener('response', onResponse);
+
+        return cb.call(this, error, responce);
+      };
+
+      onResponse = callback.bind(this, null);
+
+      request.on('error', callback);
+      request.on('response', onResponse);
+    }
+  }.bind(this));
+
+  return request;
+};
+
+FormData.prototype._error = function(err) {
+  if (!this.error) {
+    this.error = err;
+    this.pause();
+    this.emit('error', err);
+  }
+};
+
+FormData.prototype.toString = function () {
+  return '[object FormData]';
+};
+
+function getType(value) {
+  var ct = mime.getType(value);
+  if (!ct) { console.log("[ERROR] Content-Type not found. Manually set it or update here - https://github.com/pactumjs/mime-lite") }
+  return ct;
+}
+
+/***/ }),
+
+/***/ 6211:
+/***/ ((module) => {
+
+// populates missing values
+module.exports = function(dst, src) {
+
+  Object.keys(src).forEach(function(prop)
+  {
+    dst[prop] = dst[prop] || src[prop];
+  });
+
+  return dst;
+};
+
+
+/***/ }),
+
+/***/ 617:
+/***/ ((module) => {
+
+const isWin = process.platform === 'win32';
+const SEP = isWin ? `\\\\+` : `\\/`;
+const SEP_ESC = isWin ? `\\\\` : `/`;
+const GLOBSTAR = `((?:[^/]*(?:/|$))*)`;
+const WILDCARD = `([^/]*)`;
+const GLOBSTAR_SEGMENT = `((?:[^${SEP_ESC}]*(?:${SEP_ESC}|$))*)`;
+const WILDCARD_SEGMENT = `([^${SEP_ESC}]*)`;
+
+/**
+ * Convert any glob pattern to a JavaScript Regexp object
+ * @param {String} glob Glob pattern to convert
+ * @param {Object} opts Configuration object
+ * @param {Boolean} [opts.extended=false] Support advanced ext globbing
+ * @param {Boolean} [opts.globstar=false] Support globstar
+ * @param {Boolean} [opts.strict=true] be laissez faire about mutiple slashes
+ * @param {Boolean} [opts.filepath=''] Parse as filepath for extra path related features
+ * @param {String} [opts.flags=''] RegExp globs
+ * @returns {Object} converted object with string, segments and RegExp object
+ */
+function globrex(glob, {extended = false, globstar = false, strict = false, filepath = false, flags = ''} = {}) {
+    let regex = '';
+    let segment = '';
+    let path = { regex: '', segments: [] };
+
+    // If we are doing extended matching, this boolean is true when we are inside
+    // a group (eg {*.html,*.js}), and false otherwise.
+    let inGroup = false;
+    let inRange = false;
+
+    // extglob stack. Keep track of scope
+    const ext = [];
+
+    // Helper function to build string and segments
+    function add(str, {split, last, only}={}) {
+        if (only !== 'path') regex += str;
+        if (filepath && only !== 'regex') {
+            path.regex += (str === '\\/' ? SEP : str);
+            if (split) {
+                if (last) segment += str;
+                if (segment !== '') {
+                    if (!flags.includes('g')) segment = `^${segment}$`; // change it 'includes'
+                    path.segments.push(new RegExp(segment, flags));
+                }
+                segment = '';
+            } else {
+                segment += str;
+            }
+        }
+    }
+
+    let c, n;
+    for (let i = 0; i < glob.length; i++) {
+        c = glob[i];
+        n = glob[i + 1];
+
+        if (['\\', '$', '^', '.', '='].includes(c)) {
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === '/') {
+            add(`\\${c}`, {split: true});
+            if (n === '/' && !strict) regex += '?';
+            continue;
+        }
+
+        if (c === '(') {
+            if (ext.length) {
+                add(c);
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === ')') {
+            if (ext.length) {
+                add(c);
+                let type = ext.pop();
+                if (type === '@') {
+                    add('{1}');
+                } else if (type === '!') {
+                    add('([^\/]*)');
+                } else {
+                    add(type);
+                }
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+        
+        if (c === '|') {
+            if (ext.length) {
+                add(c);
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === '+') {
+            if (n === '(' && extended) {
+                ext.push(c);
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === '@' && extended) {
+            if (n === '(') {
+                ext.push(c);
+                continue;
+            }
+        }
+
+        if (c === '!') {
+            if (extended) {
+                if (inRange) {
+                    add('^');
+                    continue
+                }
+                if (n === '(') {
+                    ext.push(c);
+                    add('(?!');
+                    i++;
+                    continue;
+                }
+                add(`\\${c}`);
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === '?') {
+            if (extended) {
+                if (n === '(') {
+                    ext.push(c);
+                } else {
+                    add('.');
+                }
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === '[') {
+            if (inRange && n === ':') {
+                i++; // skip [
+                let value = '';
+                while(glob[++i] !== ':') value += glob[i];
+                if (value === 'alnum') add('(\\w|\\d)');
+                else if (value === 'space') add('\\s');
+                else if (value === 'digit') add('\\d');
+                i++; // skip last ]
+                continue;
+            }
+            if (extended) {
+                inRange = true;
+                add(c);
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === ']') {
+            if (extended) {
+                inRange = false;
+                add(c);
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === '{') {
+            if (extended) {
+                inGroup = true;
+                add('(');
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === '}') {
+            if (extended) {
+                inGroup = false;
+                add(')');
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === ',') {
+            if (inGroup) {
+                add('|');
+                continue;
+            }
+            add(`\\${c}`);
+            continue;
+        }
+
+        if (c === '*') {
+            if (n === '(' && extended) {
+                ext.push(c);
+                continue;
+            }
+            // Move over all consecutive "*"'s.
+            // Also store the previous and next characters
+            let prevChar = glob[i - 1];
+            let starCount = 1;
+            while (glob[i + 1] === '*') {
+                starCount++;
+                i++;
+            }
+            let nextChar = glob[i + 1];
+            if (!globstar) {
+                // globstar is disabled, so treat any number of "*" as one
+                add('.*');
+            } else {
+                // globstar is enabled, so determine if this is a globstar segment
+                let isGlobstar =
+                    starCount > 1 && // multiple "*"'s
+                    (prevChar === '/' || prevChar === undefined) && // from the start of the segment
+                    (nextChar === '/' || nextChar === undefined); // to the end of the segment
+                if (isGlobstar) {
+                    // it's a globstar, so match zero or more path segments
+                    add(GLOBSTAR, {only:'regex'});
+                    add(GLOBSTAR_SEGMENT, {only:'path', last:true, split:true});
+                    i++; // move over the "/"
+                } else {
+                    // it's not a globstar, so only match one path segment
+                    add(WILDCARD, {only:'regex'});
+                    add(WILDCARD_SEGMENT, {only:'path'});
+                }
+            }
+            continue;
+        }
+
+        add(c);
+    }
+
+
+    // When regexp 'g' flag is specified don't
+    // constrain the regular expression with ^ & $
+    if (!flags.includes('g')) {
+        regex = `^${regex}$`;
+        segment = `^${segment}$`;
+        if (filepath) path.regex = `^${path.regex}$`;
+    }
+
+    const result = {regex: new RegExp(regex, flags)};
+
+    // Push the last segment
+    if (filepath) {
+        path.segments.push(new RegExp(segment, flags));
+        path.regex = new RegExp(path.regex, flags);
+        path.globstar = new RegExp(!flags.includes('g') ? `^${GLOBSTAR_SEGMENT}$` : GLOBSTAR_SEGMENT, flags);
+        result.path = path;
+    }
+
+    return result;
+}
+
+module.exports = globrex;
+
+
+/***/ }),
+
+/***/ 3813:
+/***/ ((module) => {
+
+"use strict";
+
+
+module.exports = (flag, argv = process.argv) => {
+	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+	const position = argv.indexOf(prefix + flag);
+	const terminatorPosition = argv.indexOf('--');
+	return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+};
+
+
+/***/ }),
+
+/***/ 1308:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const rp = __nccwpck_require__(4873);
+
+/**
+ * @param {string} value 
+ */
+function parseMeasurement(value) {
+  return value.replace(/,/g, '\\,').replace(/ /g, '\\ ');
+}
+
+/**
+ * @param {string} value 
+ */
+function parseTag(value) {
+  return parseMeasurement(value).replace(/=/g, '\\=');
+}
+
+/**
+ * @param {string | number} value 
+ */
+function parseField(value) {
+  if (typeof value === 'string') return `"${value.replace(/"/g, '\\"')}"`;
+  return value;
+}
+
+class DB {
+
+  /**
+   * @param {import("./index").InfluxOptions} options 
+   */
+  constructor(options) {
+    if (!options) throw new Error('`options` are required');
+    if (!options.url) throw new Error('`url` is required');
+    if (options.version && options.version == 'v2') {
+      if (!options.bucket) throw new Error('`bucket` is required');
+      if (!options.org) throw new Error('`org` is required');
+      if (!options.precision) options.precision = 'ns';
+    } else {
+      if (!options.db) throw new Error('`db` is required');
+    }
+    /** @type {import("./index").InfluxOptions} */
+    this.options = options;
+  }
+
+  /**
+   * @param {import("./index").Metric | import("./index").Metric[]} metrics 
+   */
+  write(metrics) {
+    if (!metrics) throw new Error('`metrics` are required');
+    const payloads = [];
+    if (!Array.isArray(metrics)) {
+      metrics = [metrics];
+    }
+    for (let i = 0; i < metrics.length; i++) {
+      const item = metrics[i];
+      if (!item) throw new Error('`metrics` are required');
+      if (!item.measurement) throw new Error('`measurement` is required');
+      if (!item.fields) throw new Error('`fields` are required');
+      const tags = Object.keys(item.tags || {}).map(key => `,${parseTag(key)}=${parseTag(item.tags[key])}`).join('');
+      const fields = Object.keys(item.fields).map(key => `${parseTag(key)}=${parseField(item.fields[key])}`).join(',');
+      const timestamp = item.timestamp ? ` ${item.timestamp}` : '';
+      payloads.push(`${parseMeasurement(item.measurement)}${tags} ${fields}${timestamp}`);
+    }
+    const req = this.getRequest();
+    req.body = payloads.join('\n');
+    return rp.post(req);
+  }
+
+  /**
+   * @param {string} value 
+   */
+  query(value) {
+    if (!value) throw new Error('`query` is required');
+    const req = {
+      url: `${this.options.url}/query`,
+      qs: {
+        db: this.options.db,
+        q: value
+      }
+    };
+    if (this.options.username) {
+      req.auth = { user: this.options.username, pass: this.options.password };
+    }
+    return rp.get(req);
+  }
+
+  /**
+   * @param {string} query 
+   */
+  flux(query) {
+    const req = {
+      url: `${this.options.url}/api/v2/query`,
+      headers: {
+        'Accept': 'application',
+        'Content-type': 'application/vnd.flux'
+      },
+      body: query
+    };
+    if (this.options.username) {
+      req.headers['Authorization'] = `Token ${this.options.username}:${this.options.password}`;
+    }
+    return rp.post(req);
+  }
+
+  getRequest() {
+    const req = { qs: {}, headers: {} }
+    if (this.options.version === 'v2') {
+      req.url = `${this.options.url}/api/v2/write`;
+      req.qs.org = this.options.org;
+      req.qs.bucket = this.options.bucket;
+      req.qs.precision = this.options.precision;
+      if (this.options.token) {
+        req.headers['Authorization'] = `Token ${this.options.token}`;
+      }
+    } else {
+      req.url = `${this.options.url}/write`;
+      req.qs.db = this.options.db;
+      if (this.options.username) {
+        req.auth = { user: this.options.username, pass: this.options.password };
+      }
+    }
+    return req;
+  }
+
+}
+
+const influx = {
+
+  /**
+   * @param {import("./index").InfluxOptions} options 
+   */
+  db(options) {
+    return new DB(options);
+  },
+
+  /**
+   * @param {import("./index").InfluxOptions} options 
+   * @param {import("./index").Metric | import("./index").Metric[]} metrics 
+   */
+  write(options, metrics) {
+    return new DB(options).write(metrics);
+  },
+
+  /**
+   * @param {import("./index").InfluxOptions} options
+   * @param {string} value 
+   */
+  query(options, value) {
+    return new DB(options).query(value);
+  },
+
+  /**
+   * @param {import("./index").InfluxOptions} options 
+   * @param {string} query 
+   */
+  flux(options, query) {
+    return new DB(options).flux(query);
+  }
+
+};
+
+module.exports = influx;
+
+
+/***/ }),
+
+/***/ 3632:
+/***/ ((module) => {
+
+"use strict";
+
+
+function Mime() {
+  this._types = Object.create(null);
+  this._extensions = Object.create(null);
+
+  for (let i = 0; i < arguments.length; i++) {
+    this.define(arguments[i]);
+  }
+
+  this.define = this.define.bind(this);
+  this.getType = this.getType.bind(this);
+  this.getExtension = this.getExtension.bind(this);
+}
+
+Mime.prototype.define = function(typeMap, force) {
+  for (let type in typeMap) {
+    let extensions = typeMap[type].map(function(t) {
+      return t.toLowerCase();
+    });
+    type = type.toLowerCase();
+
+    for (let i = 0; i < extensions.length; i++) {
+      const ext = extensions[i];
+
+      // '*' prefix = not the preferred type for this extension.  So fixup the
+      // extension, and skip it.
+      if (ext[0] === '*') {
+        continue;
+      }
+
+      if (!force && (ext in this._types)) {
+        throw new Error(
+          'Attempt to change mapping for "' + ext +
+          '" extension from "' + this._types[ext] + '" to "' + type +
+          '". Pass `force=true` to allow this, otherwise remove "' + ext +
+          '" from the list of extensions for "' + type + '".'
+        );
+      }
+
+      this._types[ext] = type;
+    }
+
+    // Use first extension as default
+    if (force || !this._extensions[type]) {
+      const ext = extensions[0];
+      this._extensions[type] = (ext[0] !== '*') ? ext : ext.substr(1);
+    }
+  }
+};
+
+Mime.prototype.getType = function(path) {
+  path = String(path);
+  let last = path.replace(/^.*[/\\]/, '').toLowerCase();
+  let ext = last.replace(/^.*\./, '').toLowerCase();
+
+  let hasPath = last.length < path.length;
+  let hasDot = ext.length < last.length - 1;
+
+  return (hasDot || !hasPath) && this._types[ext] || null;
+};
+
+Mime.prototype.getExtension = function(type) {
+  type = /^\s*([^;\s]*)/.test(type) && RegExp.$1;
+  return type && this._extensions[type.toLowerCase()] || null;
+};
+
+module.exports = Mime;
+
+/***/ }),
+
+/***/ 2794:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+let Mime = __nccwpck_require__(3632);
+module.exports = new Mime(__nccwpck_require__(1319), __nccwpck_require__(7085));
+
+/***/ }),
+
+/***/ 7085:
+/***/ ((module) => {
+
+module.exports = {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ["xlsx"],"application/vnd.openxmlformats-officedocument.spreadsheetml.template":["xltx"],"application/vnd.openxmlformats-officedocument.wordprocessingml.document":["docx"],"application/vnd.openxmlformats-officedocument.wordprocessingml.template":["dotx"],"application/vnd.ms-excel":["xls","xlm","xla","xlc","xlt","xlw"]}
+
+/***/ }),
+
+/***/ 1319:
+/***/ ((module) => {
+
+module.exports = {"application/andrew-inset":["ez"],"application/applixware":["aw"],"application/atom+xml":["atom"],"application/atomcat+xml":["atomcat"],"application/atomdeleted+xml":["atomdeleted"],"application/atomsvc+xml":["atomsvc"],"application/atsc-dwd+xml":["dwd"],"application/atsc-held+xml":["held"],"application/atsc-rsat+xml":["rsat"],"application/bdoc":["bdoc"],"application/calendar+xml":["xcs"],"application/ccxml+xml":["ccxml"],"application/cdfx+xml":["cdfx"],"application/cdmi-capability":["cdmia"],"application/cdmi-container":["cdmic"],"application/cdmi-domain":["cdmid"],"application/cdmi-object":["cdmio"],"application/cdmi-queue":["cdmiq"],"application/cu-seeme":["cu"],"application/dash+xml":["mpd"],"application/davmount+xml":["davmount"],"application/docbook+xml":["dbk"],"application/dssc+der":["dssc"],"application/dssc+xml":["xdssc"],"application/ecmascript":["ecma","es"],"application/emma+xml":["emma"],"application/emotionml+xml":["emotionml"],"application/epub+zip":["epub"],"application/exi":["exi"],"application/fdt+xml":["fdt"],"application/font-tdpfr":["pfr"],"application/geo+json":["geojson"],"application/gml+xml":["gml"],"application/gpx+xml":["gpx"],"application/gxf":["gxf"],"application/gzip":["gz"],"application/hjson":["hjson"],"application/hyperstudio":["stk"],"application/inkml+xml":["ink","inkml"],"application/ipfix":["ipfix"],"application/its+xml":["its"],"application/java-archive":["jar","war","ear"],"application/java-serialized-object":["ser"],"application/java-vm":["class"],"application/javascript":["js","mjs"],"application/json":["json","map"],"application/json5":["json5"],"application/jsonml+json":["jsonml"],"application/ld+json":["jsonld"],"application/lgr+xml":["lgr"],"application/lost+xml":["lostxml"],"application/mac-binhex40":["hqx"],"application/mac-compactpro":["cpt"],"application/mads+xml":["mads"],"application/manifest+json":["webmanifest"],"application/marc":["mrc"],"application/marcxml+xml":["mrcx"],"application/mathematica":["ma","nb","mb"],"application/mathml+xml":["mathml"],"application/mbox":["mbox"],"application/mediaservercontrol+xml":["mscml"],"application/metalink+xml":["metalink"],"application/metalink4+xml":["meta4"],"application/mets+xml":["mets"],"application/mmt-aei+xml":["maei"],"application/mmt-usd+xml":["musd"],"application/mods+xml":["mods"],"application/mp21":["m21","mp21"],"application/mp4":["mp4s","m4p"],"application/mrb-consumer+xml":["*xdf"],"application/mrb-publish+xml":["*xdf"],"application/msword":["doc","dot"],"application/mxf":["mxf"],"application/n-quads":["nq"],"application/n-triples":["nt"],"application/node":["cjs"],"application/octet-stream":["bin","dms","lrf","mar","so","dist","distz","pkg","bpk","dump","elc","deploy","exe","dll","deb","dmg","iso","img","msi","msp","msm","buffer"],"application/oda":["oda"],"application/oebps-package+xml":["opf"],"application/ogg":["ogx"],"application/omdoc+xml":["omdoc"],"application/onenote":["onetoc","onetoc2","onetmp","onepkg"],"application/oxps":["oxps"],"application/p2p-overlay+xml":["relo"],"application/patch-ops-error+xml":["*xer"],"application/pdf":["pdf"],"application/pgp-encrypted":["pgp"],"application/pgp-signature":["asc","sig"],"application/pics-rules":["prf"],"application/pkcs10":["p10"],"application/pkcs7-mime":["p7m","p7c"],"application/pkcs7-signature":["p7s"],"application/pkcs8":["p8"],"application/pkix-attr-cert":["ac"],"application/pkix-cert":["cer"],"application/pkix-crl":["crl"],"application/pkix-pkipath":["pkipath"],"application/pkixcmp":["pki"],"application/pls+xml":["pls"],"application/postscript":["ai","eps","ps"],"application/provenance+xml":["provx"],"application/pskc+xml":["pskcxml"],"application/raml+yaml":["raml"],"application/rdf+xml":["rdf","owl"],"application/reginfo+xml":["rif"],"application/relax-ng-compact-syntax":["rnc"],"application/resource-lists+xml":["rl"],"application/resource-lists-diff+xml":["rld"],"application/rls-services+xml":["rs"],"application/route-apd+xml":["rapd"],"application/route-s-tsid+xml":["sls"],"application/route-usd+xml":["rusd"],"application/rpki-ghostbusters":["gbr"],"application/rpki-manifest":["mft"],"application/rpki-roa":["roa"],"application/rsd+xml":["rsd"],"application/rss+xml":["rss"],"application/rtf":["rtf"],"application/sbml+xml":["sbml"],"application/scvp-cv-request":["scq"],"application/scvp-cv-response":["scs"],"application/scvp-vp-request":["spq"],"application/scvp-vp-response":["spp"],"application/sdp":["sdp"],"application/senml+xml":["senmlx"],"application/sensml+xml":["sensmlx"],"application/set-payment-initiation":["setpay"],"application/set-registration-initiation":["setreg"],"application/shf+xml":["shf"],"application/sieve":["siv","sieve"],"application/smil+xml":["smi","smil"],"application/sparql-query":["rq"],"application/sparql-results+xml":["srx"],"application/srgs":["gram"],"application/srgs+xml":["grxml"],"application/sru+xml":["sru"],"application/ssdl+xml":["ssdl"],"application/ssml+xml":["ssml"],"application/swid+xml":["swidtag"],"application/tei+xml":["tei","teicorpus"],"application/thraud+xml":["tfi"],"application/timestamped-data":["tsd"],"application/toml":["toml"],"application/ttml+xml":["ttml"],"application/ubjson":["ubj"],"application/urc-ressheet+xml":["rsheet"],"application/urc-targetdesc+xml":["td"],"application/voicexml+xml":["vxml"],"application/wasm":["wasm"],"application/widget":["wgt"],"application/winhlp":["hlp"],"application/wsdl+xml":["wsdl"],"application/wspolicy+xml":["wspolicy"],"application/xaml+xml":["xaml"],"application/xcap-att+xml":["xav"],"application/xcap-caps+xml":["xca"],"application/xcap-diff+xml":["xdf"],"application/xcap-el+xml":["xel"],"application/xcap-error+xml":["xer"],"application/xcap-ns+xml":["xns"],"application/xenc+xml":["xenc"],"application/xhtml+xml":["xhtml","xht"],"application/xliff+xml":["xlf"],"application/xml":["xml","xsl","xsd","rng"],"application/xml-dtd":["dtd"],"application/xop+xml":["xop"],"application/xproc+xml":["xpl"],"application/xslt+xml":["*xsl","xslt"],"application/xspf+xml":["xspf"],"application/xv+xml":["mxml","xhvml","xvml","xvm"],"application/yang":["yang"],"application/yin+xml":["yin"],"application/zip":["zip"],"audio/3gpp":["*3gpp"],"audio/adpcm":["adp"],"audio/amr":["amr"],"audio/basic":["au","snd"],"audio/midi":["mid","midi","kar","rmi"],"audio/mobile-xmf":["mxmf"],"audio/mp3":["*mp3"],"audio/mp4":["m4a","mp4a"],"audio/mpeg":["mpga","mp2","mp2a","mp3","m2a","m3a"],"audio/ogg":["oga","ogg","spx","opus"],"audio/s3m":["s3m"],"audio/silk":["sil"],"audio/wav":["wav"],"audio/wave":["*wav"],"audio/webm":["weba"],"audio/xm":["xm"],"font/collection":["ttc"],"font/otf":["otf"],"font/ttf":["ttf"],"font/woff":["woff"],"font/woff2":["woff2"],"image/aces":["exr"],"image/apng":["apng"],"image/avif":["avif"],"image/bmp":["bmp"],"image/cgm":["cgm"],"image/dicom-rle":["drle"],"image/emf":["emf"],"image/fits":["fits"],"image/g3fax":["g3"],"image/gif":["gif"],"image/heic":["heic"],"image/heic-sequence":["heics"],"image/heif":["heif"],"image/heif-sequence":["heifs"],"image/hej2k":["hej2"],"image/hsj2":["hsj2"],"image/ief":["ief"],"image/jls":["jls"],"image/jp2":["jp2","jpg2"],"image/jpeg":["jpeg","jpg","jpe"],"image/jph":["jph"],"image/jphc":["jhc"],"image/jpm":["jpm"],"image/jpx":["jpx","jpf"],"image/jxr":["jxr"],"image/jxra":["jxra"],"image/jxrs":["jxrs"],"image/jxs":["jxs"],"image/jxsc":["jxsc"],"image/jxsi":["jxsi"],"image/jxss":["jxss"],"image/ktx":["ktx"],"image/ktx2":["ktx2"],"image/png":["png"],"image/sgi":["sgi"],"image/svg+xml":["svg","svgz"],"image/t38":["t38"],"image/tiff":["tif","tiff"],"image/tiff-fx":["tfx"],"image/webp":["webp"],"image/wmf":["wmf"],"message/disposition-notification":["disposition-notification"],"message/global":["u8msg"],"message/global-delivery-status":["u8dsn"],"message/global-disposition-notification":["u8mdn"],"message/global-headers":["u8hdr"],"message/rfc822":["eml","mime"],"model/3mf":["3mf"],"model/gltf+json":["gltf"],"model/gltf-binary":["glb"],"model/iges":["igs","iges"],"model/mesh":["msh","mesh","silo"],"model/mtl":["mtl"],"model/obj":["obj"],"model/stl":["stl"],"model/vrml":["wrl","vrml"],"model/x3d+binary":["*x3db","x3dbz"],"model/x3d+fastinfoset":["x3db"],"model/x3d+vrml":["*x3dv","x3dvz"],"model/x3d+xml":["x3d","x3dz"],"model/x3d-vrml":["x3dv"],"text/cache-manifest":["appcache","manifest"],"text/calendar":["ics","ifb"],"text/coffeescript":["coffee","litcoffee"],"text/css":["css"],"text/csv":["csv"],"text/html":["html","htm","shtml"],"text/jade":["jade"],"text/jsx":["jsx"],"text/less":["less"],"text/markdown":["markdown","md"],"text/mathml":["mml"],"text/mdx":["mdx"],"text/n3":["n3"],"text/plain":["txt","text","conf","def","list","log","in","ini"],"text/richtext":["rtx"],"text/rtf":["*rtf"],"text/sgml":["sgml","sgm"],"text/shex":["shex"],"text/slim":["slim","slm"],"text/spdx":["spdx"],"text/stylus":["stylus","styl"],"text/tab-separated-values":["tsv"],"text/troff":["t","tr","roff","man","me","ms"],"text/turtle":["ttl"],"text/uri-list":["uri","uris","urls"],"text/vcard":["vcard"],"text/vtt":["vtt"],"text/xml":["*xml"],"text/yaml":["yaml","yml"],"video/3gpp":["3gp","3gpp"],"video/3gpp2":["3g2"],"video/h261":["h261"],"video/h263":["h263"],"video/h264":["h264"],"video/iso.segment":["m4s"],"video/jpeg":["jpgv"],"video/jpm":["*jpm","jpgm"],"video/mj2":["mj2","mjp2"],"video/mp2t":["ts"],"video/mp4":["mp4","mp4v","mpg4"],"video/mpeg":["mpeg","mpg","mpe","m1v","m2v"],"video/ogg":["ogv"],"video/quicktime":["qt","mov"],"video/webm":["webm"]};
+
+/***/ }),
+
+/***/ 744:
+/***/ ((module) => {
+
+/**
+ * Helpers.
+ */
+
+var s = 1000;
+var m = s * 60;
+var h = m * 60;
+var d = h * 24;
+var w = d * 7;
+var y = d * 365.25;
+
+/**
+ * Parse or format the given `val`.
+ *
+ * Options:
+ *
+ *  - `long` verbose formatting [false]
+ *
+ * @param {String|Number} val
+ * @param {Object} [options]
+ * @throws {Error} throw an error if val is not a non-empty string or a number
+ * @return {String|Number}
+ * @api public
+ */
+
+module.exports = function(val, options) {
+  options = options || {};
+  var type = typeof val;
+  if (type === 'string' && val.length > 0) {
+    return parse(val);
+  } else if (type === 'number' && isFinite(val)) {
+    return options.long ? fmtLong(val) : fmtShort(val);
+  }
+  throw new Error(
+    'val is not a non-empty string or a valid number. val=' +
+      JSON.stringify(val)
+  );
+};
+
+/**
+ * Parse the given `str` and return milliseconds.
+ *
+ * @param {String} str
+ * @return {Number}
+ * @api private
+ */
+
+function parse(str) {
+  str = String(str);
+  if (str.length > 100) {
+    return;
+  }
+  var match = /^(-?(?:\d+)?\.?\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$/i.exec(
+    str
+  );
+  if (!match) {
+    return;
+  }
+  var n = parseFloat(match[1]);
+  var type = (match[2] || 'ms').toLowerCase();
+  switch (type) {
+    case 'years':
+    case 'year':
+    case 'yrs':
+    case 'yr':
+    case 'y':
+      return n * y;
+    case 'weeks':
+    case 'week':
+    case 'w':
+      return n * w;
+    case 'days':
+    case 'day':
+    case 'd':
+      return n * d;
+    case 'hours':
+    case 'hour':
+    case 'hrs':
+    case 'hr':
+    case 'h':
+      return n * h;
+    case 'minutes':
+    case 'minute':
+    case 'mins':
+    case 'min':
+    case 'm':
+      return n * m;
+    case 'seconds':
+    case 'second':
+    case 'secs':
+    case 'sec':
+    case 's':
+      return n * s;
+    case 'milliseconds':
+    case 'millisecond':
+    case 'msecs':
+    case 'msec':
+    case 'ms':
+      return n;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Short format for `ms`.
+ *
+ * @param {Number} ms
+ * @return {String}
+ * @api private
+ */
+
+function fmtShort(ms) {
+  var msAbs = Math.abs(ms);
+  if (msAbs >= d) {
+    return Math.round(ms / d) + 'd';
+  }
+  if (msAbs >= h) {
+    return Math.round(ms / h) + 'h';
+  }
+  if (msAbs >= m) {
+    return Math.round(ms / m) + 'm';
+  }
+  if (msAbs >= s) {
+    return Math.round(ms / s) + 's';
+  }
+  return ms + 'ms';
+}
+
+/**
+ * Long format for `ms`.
+ *
+ * @param {Number} ms
+ * @return {String}
+ * @api private
+ */
+
+function fmtLong(ms) {
+  var msAbs = Math.abs(ms);
+  if (msAbs >= d) {
+    return plural(ms, msAbs, d, 'day');
+  }
+  if (msAbs >= h) {
+    return plural(ms, msAbs, h, 'hour');
+  }
+  if (msAbs >= m) {
+    return plural(ms, msAbs, m, 'minute');
+  }
+  if (msAbs >= s) {
+    return plural(ms, msAbs, s, 'second');
+  }
+  return ms + ' ms';
+}
+
+/**
+ * Pluralization helper.
+ */
+
+function plural(ms, msAbs, n, name) {
+  var isPlural = msAbs >= n * 1.5;
+  return Math.round(ms / n) + ' ' + name + (isPlural ? 's' : '');
+}
+
+
+/***/ }),
+
+/***/ 4345:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const path = __nccwpck_require__(6928);
+const fs = __nccwpck_require__(9896);
+const csv_json = __nccwpck_require__(1090);
+
+function parse(jtl_file_path) {
+  const cwd = process.cwd();
+  const text = fs.readFileSync(path.join(cwd, jtl_file_path), { encoding: 'utf8' });
+  const rows = csv_json.toObject(text, { delimiter: ',', quote: '"' });
+  const aggregate_records = {};
+  const total_requests_record = getTotalRecord();
+  const total_transaction_record = getTotalRecord();
+  for (const record of rows) {
+    parseRecord(record);
+    if (!aggregate_records[record.label]) {
+      setInitialAggregateReport(aggregate_records, record);
+    }
+    const total_report = aggregate_records[record.label].transaction ? total_transaction_record : total_requests_record;
+    setCounts(aggregate_records, total_report, record);
+  }
+  summarize(aggregate_records);
+  setSummaryCounts(total_requests_record);
+  setSummaryCounts(total_transaction_record);
+  copyLatencies(total_transaction_record, total_requests_record);
+  return { requests: getFilteredRecord(aggregate_records, false), transactions: getFilteredRecord(aggregate_records, true), total_requests: total_requests_record, total_transactions: total_transaction_record, all: aggregate_records };
+}
+
+function getTotalRecord() {
+  return JSON.parse(JSON.stringify({
+    label: 'TOTAL',
+    samples: 0,
+    errors: 0,
+    elapsed_times: [],
+    max: Number.MIN_VALUE,
+    min: Number.MAX_VALUE,
+    total: 0,
+    received: 0,
+    sent: 0,
+    latencies: [],
+    max_latency: Number.MIN_VALUE,
+    min_latency: Number.MAX_VALUE,
+    total_latency: 0,
+  }));
+}
+
+function parseRecord(record) {
+  record.timeStamp = parseInt(record.timeStamp);
+  record.elapsed = parseInt(record.elapsed);
+  record.responseCode = parseInt(record.responseCode);
+  record.bytes = parseInt(record.bytes);
+  record.sentBytes = parseInt(record.sentBytes);
+  if (record.Latency) {
+    record.Latency = parseInt(record.Latency);
+  }
+  if (record.IdleTime) {
+    record.IdleTime = parseInt(record.IdleTime);
+  }
+  if (record.Connect) {
+    record.Connect = parseInt(record.Connect);
+  }
+}
+
+function setInitialAggregateReport(aggregate_report, record) {
+  aggregate_report[record.label] = {
+    label: record.label,
+    samples: 0,
+    errors: 0,
+    elapsed_times: [],
+    max: Number.MIN_VALUE,
+    min: Number.MAX_VALUE,
+    total: 0,
+    received: 0,
+    sent: 0,
+    start: record.timeStamp,
+    transaction: record.URL === "null",
+    latencies: [],
+    max_latency: Number.MIN_VALUE,
+    min_latency: Number.MAX_VALUE,
+    total_latency: 0,
+  };
+}
+
+function setCounts(aggregate_records, total_report, record) {
+  const aggregate_record = aggregate_records[record.label];
+
+  aggregate_record.samples += 1;
+  total_report.samples += 1;
+
+  if (record.responseCode >= 400) {
+    aggregate_record.errors += 1;
+    total_report.errors += 1;
+  }
+
+  aggregate_record.max = Math.max(aggregate_record.max, record.elapsed);
+  total_report.max = Math.max(total_report.max, record.elapsed);
+
+  aggregate_record.min = Math.min(aggregate_record.min, record.elapsed);
+  total_report.min = Math.min(total_report.min, record.elapsed);
+
+  aggregate_record.total += record.elapsed;
+  total_report.total += record.elapsed;
+
+  aggregate_record.received += record.bytes;
+  total_report.received += record.bytes;
+
+  aggregate_record.sent += record.sentBytes;
+  total_report.sent += record.sentBytes;
+
+  aggregate_record.elapsed_times.push(record.elapsed);
+  total_report.elapsed_times.push(record.elapsed);
+
+  aggregate_record.end = record.timeStamp + record.elapsed;
+  total_report.end = record.timeStamp + record.elapsed;
+
+  if (!total_report.start) {
+    total_report.start = record.timeStamp;
+  }
+
+  if (Number.isInteger(record.Latency) && !aggregate_record.transaction) {
+    aggregate_record.latencies.push(record.Latency);
+    total_report.latencies.push(record.Latency);
+
+    aggregate_record.max_latency = Math.max(aggregate_record.max_latency, record.Latency);
+    total_report.max_latency = Math.max(total_report.max_latency, record.Latency);
+
+    aggregate_record.min_latency = Math.min(aggregate_record.min_latency, record.Latency);
+    total_report.min_latency = Math.min(total_report.min_latency, record.Latency);
+
+    aggregate_record.total_latency += record.Latency;
+    total_report.total_latency += record.Latency;
+  }
+}
+
+function summarize(aggregate_report) {
+  for (const key in aggregate_report) {
+    if (Object.hasOwnProperty.call(aggregate_report, key)) {
+      const transaction = aggregate_report[key];
+      setSummaryCounts(transaction);
+    }
+  }
+}
+
+function setSummaryCounts(total_record) {
+  if (total_record.elapsed_times.length > 0) {
+    total_record.tps = +((total_record.samples * 1000 / (total_record.end - total_record.start)).toFixed(2));
+    total_record.average = +((total_record.total / total_record.samples).toFixed(2));
+    const sorted_response_times = total_record.elapsed_times.sort((a, b) => b - a);
+    total_record.p50 = calculatePercentile(sorted_response_times, 50);
+    total_record.p90 = calculatePercentile(sorted_response_times, 90);
+    total_record.p95 = calculatePercentile(sorted_response_times, 95);
+    total_record.p99 = calculatePercentile(sorted_response_times, 99);
+    total_record.error_rate = +((total_record.errors / total_record.samples).toFixed(2));
+    total_record.sent_rate = +((total_record.sent / (total_record.end - total_record.start)).toFixed(2));
+    total_record.received_rate = +((total_record.received / (total_record.end - total_record.start)).toFixed(2));
+    total_record.median = median(sorted_response_times);
+  } else {
+    total_record.max = 0;
+    total_record.min = 0;
+  }
+
+  if (total_record.latencies.length > 0) {
+    const sorted_latencies = total_record.latencies.sort((a, b) => b - a);
+    total_record.average_latency = +((total_record.total_latency / total_record.samples).toFixed(2));
+    total_record.p50_latency = calculatePercentile(sorted_latencies, 50);
+    total_record.p90_latency = calculatePercentile(sorted_latencies, 90);
+    total_record.p95_latency = calculatePercentile(sorted_latencies, 95);
+    total_record.p99_latency = calculatePercentile(sorted_latencies, 99);
+    total_record.median_latency = median(sorted_latencies);
+  } else {
+    total_record.max_latency = 0;
+    total_record.min_latency = 0;
+  }
+
+}
+
+function calculatePercentile(sorted_response_times, percentile) {
+  const divisor = (100 - percentile) / 100;
+  const xPercent = parseInt(Math.ceil(sorted_response_times.length * divisor));
+  return sorted_response_times.slice(0, xPercent).slice(-1)[0];
+};
+
+function median(array) {
+  if (array.length === 0) {
+    return 0;
+  }
+
+  if (array.length % 2 !== 0) {
+    return parseFloat(array[Math.floor(array.length / 2)]);
+  } else {
+    const mid = array.length / 2;
+    return (array[mid - 1] + array[mid]) / 2;
+  }
+}
+
+function getFilteredRecord(aggregate_report, transaction) {
+  const filtered_report = {}
+  for (const key in aggregate_report) {
+    if (Object.hasOwnProperty.call(aggregate_report, key)) {
+      const current_record = aggregate_report[key];
+      if (current_record['transaction'] === transaction) {
+        filtered_report[key] = current_record;
+      }
+    }
+  }
+  return filtered_report;
+}
+
+function copyLatencies(total_transactions_record, total_requests_record) {
+  if (total_requests_record.latencies.length > 0) {
+    total_transactions_record.p50_latency = total_requests_record.p50_latency;
+    total_transactions_record.p90_latency = total_requests_record.p90_latency;
+    total_transactions_record.p95_latency = total_requests_record.p95_latency;
+    total_transactions_record.p99_latency = total_requests_record.p99_latency;
+    total_transactions_record.average_latency = total_requests_record.average_latency;
+    total_transactions_record.median_latency = total_requests_record.median_latency;
+    total_transactions_record.max_latency = total_requests_record.max_latency;
+    total_transactions_record.min_latency = total_requests_record.min_latency;
+    total_transactions_record.total_latency = total_requests_record.total_latency;
+    total_transactions_record.latencies = total_requests_record.latencies;
+  }
+}
+
+function aggregate(jtl_file_path) {
+  const { total_transactions, transactions } = parse(jtl_file_path);
+  const records = [];
+  for (const key in transactions) {
+    if (Object.hasOwnProperty.call(transactions, key)) {
+      const transaction = transactions[key];
+      records.push(getCSVAggregateRecord(transaction));
+    }
+  }
+  records.push(getCSVAggregateRecord(total_transactions));
+  return records;
+}
+
+function getCSVAggregateRecord(aggregate_record) {
+  const record = {
+    'Label': aggregate_record.label,
+    '# Samples': aggregate_record.samples,
+    'Throughput': aggregate_record.tps,
+    'Average': aggregate_record.average,
+    'Median': aggregate_record.median,
+    '90% Line': aggregate_record.p90,
+    '95% Line': aggregate_record.p95,
+    '99% Line': aggregate_record.p99,
+    'Min': aggregate_record.min,
+    'Max': aggregate_record.max,
+    'Error %': aggregate_record.error_rate + '%',
+    'Sent KB/sec': aggregate_record.sent_rate,
+    'Received KB/sec': aggregate_record.received_rate,
+  }
+  if (aggregate_record.latencies.length > 0) {
+    record['Average Latency'] = aggregate_record.average_latency;
+    record['Median Latency'] = aggregate_record.median_latency;
+    record['90% Latency'] = aggregate_record.p90_latency;
+    record['95% Latency'] = aggregate_record.p95_latency;
+    record['99% Latency'] = aggregate_record.p99_latency;
+    record['Min Latency'] = aggregate_record.min_latency;
+    record['Max Latency'] = aggregate_record.max_latency;
+  }
+  return record;
+}
+
+module.exports = {
+  parse,
+  aggregate
+};
+
+
+/***/ }),
+
+/***/ 3222:
+/***/ ((module) => {
+
+"use strict";
+
+module.exports = milliseconds => {
+	if (typeof milliseconds !== 'number') {
+		throw new TypeError('Expected a number');
+	}
+
+	const roundTowardsZero = milliseconds > 0 ? Math.floor : Math.ceil;
+
+	return {
+		days: roundTowardsZero(milliseconds / 86400000),
+		hours: roundTowardsZero(milliseconds / 3600000) % 24,
+		minutes: roundTowardsZero(milliseconds / 60000) % 60,
+		seconds: roundTowardsZero(milliseconds / 1000) % 60,
+		milliseconds: roundTowardsZero(milliseconds) % 1000,
+		microseconds: roundTowardsZero(milliseconds * 1000) % 1000,
+		nanoseconds: roundTowardsZero(milliseconds * 1e6) % 1000
+	};
+};
+
+
+/***/ }),
+
+/***/ 3498:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const path = __nccwpck_require__(6928);
+const { totalist } = __nccwpck_require__(339);
+const globrex = __nccwpck_require__(617);
+const Threshold = __nccwpck_require__(8838);
+const Metric = __nccwpck_require__(8241);
+const Transaction = __nccwpck_require__(1665);
+
+/**
+ * @param {string} file_path 
+ */
+function getMatchingFilePaths(file_path) {
+  if (file_path.includes('*')) {
+    const file_paths = [];
+    const result = globrex(file_path);
+    const dir_name = path.dirname(file_path.substring(0, file_path.indexOf('*') + 1));
+    totalist(dir_name, (name) => {
+      const current_file_path = `${dir_name}/${name}`;
+      if (result.regex.test(current_file_path)) {
+        file_paths.push(current_file_path);
+      }
+    });
+    return file_paths;
+  }
+  return [file_path];
+}
+
+/**
+ * @param {Transaction} transaction 
+ * @param {Metric} metric 
+ * @param {Threshold[]} thresholds 
+ */
+function setMetricStatus(transaction, metric, thresholds) {
+  if (thresholds) {
+    const threshold = thresholds.find(_threshold => {
+      const metric_matched = _threshold.metric === metric.name;
+      if (metric_matched) {
+        if (_threshold.scope === 'TRANSACTION') {
+          return _threshold.transactions.includes(transaction.name);
+        } else if (_threshold.scope === 'OVERALL') {
+          return transaction.name === 'TOTAL';
+        }
+        return true;
+      }
+      return false;
+    });
+    if (threshold) {
+      for(let i = 0; i < threshold.checks.length; i++) {
+        const check = threshold.checks[i];
+        const [field, value] = check.split(/<|>/);
+        const difference = metric[field] - parseFloat(value);
+        if (check.includes('<')) {
+          if (difference > 0) {
+            metric.failures.push({
+              field,
+              difference
+            });
+          } 
+        } else if (check.includes('>')) {
+          if (difference < 0) {
+            metric.failures.push({
+              field,
+              difference
+            });
+          }
+        }
+      }
+    }
+  }
+  metric.status = metric.failures.length > 0 ? 'FAIL' : 'PASS';
+}
+
+module.exports = {
+  getMatchingFilePaths,
+  setMetricStatus
+}
+
+/***/ }),
+
+/***/ 3874:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const parser = __nccwpck_require__(3469)
+
+function parse(options) {
+  return parser.parse(options);
+}
+
+module.exports = {
+  parse
+}
+
+/***/ }),
+
+/***/ 8241:
+/***/ ((module) => {
+
+class Metric {
+
+  constructor() {
+    this.name = '';
+    this.type = '';
+    this.sum = 0;
+    this.rate = 0;
+    this.unit = '';
+    this.avg = 0;
+    this.med = 0;
+    this.max = 0;
+    this.min = 0;
+    this.p90 = 0;
+    this.p95 = 0;
+    this.p99 = 0;
+    this.failures = [];
+  }
+
+}
+
+module.exports = Metric;
+
+/***/ }),
+
+/***/ 9818:
+/***/ ((module) => {
+
+class PerformanceTestResult {
+
+  constructor() {
+    this.name = '';
+    this.status = '';
+    this.metrics = [];
+    this.transactions = [];
+  }
+
+}
+
+module.exports = PerformanceTestResult;
+
+/***/ }),
+
+/***/ 8838:
+/***/ ((module) => {
+
+class Threshold {}
+
+module.exports = Threshold;
+
+/***/ }),
+
+/***/ 1665:
+/***/ ((module) => {
+
+class Transaction {
+
+  constructor() {
+    this.name = '';
+    this.status = '';
+    this.metrics = [];
+  }
+
+}
+
+module.exports = Transaction;
+
+/***/ }),
+
+/***/ 3469:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const jmeter = __nccwpck_require__(6494);
+const { getMatchingFilePaths } = __nccwpck_require__(3498);
+
+function getParser(result_type) {
+  switch (result_type) {
+    case 'jmeter':
+      return jmeter;
+    default:
+      throw `UnSupported Result Type - ${result_type}`;
+  }
+}
+
+function merge(results) {
+  return results[0];
+}
+
+/**
+ * @param {import('../index').ParseOptions} options 
+ */
+function parse(options) {
+  const parser = getParser(options.type);
+  const results = [];
+  for (let i = 0; i < options.files.length; i++) {
+    const matched_files = getMatchingFilePaths(options.files[i]);
+    for (let j = 0; j < matched_files.length; j++) {
+      const file = matched_files[j];
+      results.push(parser.parse(file, options.thresholds));
+    }
+  }
+  return merge(results);
+}
+
+module.exports = {
+  parse
+}
+
+/***/ }),
+
+/***/ 6494:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const fs = __nccwpck_require__(9896);
+const path = __nccwpck_require__(6928);
+const csv_json = __nccwpck_require__(1090);
+const { aggregate } = __nccwpck_require__(4345);
+const PerformanceTestResult = __nccwpck_require__(9818);
+const Transaction = __nccwpck_require__(1665);
+const Metric = __nccwpck_require__(8241);
+const Threshold = __nccwpck_require__(8838);
+const { setMetricStatus } = __nccwpck_require__(3498);
+
+function parse(file, thresholds) {
+  const extension = path.extname(file);
+  if (extension === '.csv') {
+    return getResultFromCSV(file, thresholds);
+  } else {
+    return getResultFromJTLFile(file, thresholds);
+  }
+}
+
+function getResultFromCSV(file, thresholds) {
+  const cwd = process.cwd();
+  const results = csv_json.toObject(fs.readFileSync(path.join(cwd, file), { encoding: 'utf8' }));
+  const perf_result = getTransaction(new PerformanceTestResult(), results[results.length - 1], thresholds);
+  for (let i = 0; i < results.length - 1; i++) {
+    perf_result.transactions.push(getTransaction(new Transaction(), results[i], thresholds));
+  }
+  if (perf_result.status === 'PASS' && perf_result.transactions.some(_trans => _trans.status === 'FAIL')) {
+    perf_result.status = 'FAIL';
+  }
+  return perf_result;
+}
+
+/**
+ * @param {Transaction} transaction 
+ * @param {object} record 
+ * @param {Threshold[]} thresholds
+ * @returns 
+ */
+function getTransaction(transaction, record, thresholds) {
+  transaction.name = record['Label'];
+  transaction.metrics.push(getSampleMetric(transaction, record, thresholds));
+  transaction.metrics.push(getRequestDurationMetric(transaction, record, thresholds));
+  transaction.metrics.push(getErrorMetric(transaction, record, thresholds));
+  transaction.metrics.push(getDataSentMetric(transaction, record, thresholds));
+  transaction.metrics.push(getDataReceivedMetric(transaction, record, thresholds));
+  if (record['Average Latency']) {
+    transaction.metrics.push(getRequestLatencyMetric(transaction, record, thresholds));
+  }
+  transaction.status = transaction.metrics.some(_metric => _metric.status === 'FAIL') ? 'FAIL' : 'PASS';
+  return transaction;
+}
+
+/**
+ * @param {object} record 
+ * @param {Threshold[]} thresholds 
+ * @returns 
+ */
+function getSampleMetric(transaction, record, thresholds) {
+  const metric = new Metric();
+  metric.name = 'Samples';
+  metric.type = 'COUNTER';
+  metric.sum = parseInt(record['# Samples']);
+  metric.rate = parseFloat(record['Throughput']);
+  metric.unit = '/s';
+  setMetricStatus(transaction, metric, thresholds);
+  return metric;
+}
+
+/**
+ * @param {object} record 
+ * @param {Threshold[]} thresholds 
+ * @returns 
+ */
+function getRequestDurationMetric(transaction, record, thresholds) {
+  const metric = new Metric();
+  metric.name = 'Duration';
+  metric.type = 'TREND';
+  metric.avg = parseInt(record['Average']);
+  metric.med = parseInt(record['Median']);
+  metric.p90 = parseInt(record['90% Line']);
+  metric.p95 = parseInt(record['95% Line']);
+  metric.p99 = parseInt(record['99% Line']);
+  metric.min = parseInt(record['Min']);
+  metric.max = parseInt(record['Max']);
+  setMetricStatus(transaction, metric, thresholds);
+  return metric;
+}
+
+/**
+ * @param {object} record 
+ * @param {Threshold[]} thresholds 
+ * @returns 
+ */
+function getRequestLatencyMetric(transaction, record, thresholds) {
+  const metric = new Metric();
+  metric.name = 'Latency';
+  metric.type = 'TREND';
+  metric.avg = parseInt(record['Average Latency']);
+  metric.med = parseInt(record['Median Latency']);
+  metric.p90 = parseInt(record['90% Latency']);
+  metric.p95 = parseInt(record['95% Latency']);
+  metric.p99 = parseInt(record['99% Latency']);
+  metric.min = parseInt(record['Min Latency']);
+  metric.max = parseInt(record['Max Latency']);
+  setMetricStatus(transaction, metric, thresholds);
+  return metric;
+}
+
+/**
+ * @param {object} record 
+ * @param {Threshold[]} thresholds 
+ * @returns 
+ */
+function getErrorMetric(transaction, record, thresholds) {
+  const metric = new Metric();
+  metric.name = 'Errors';
+  metric.type = 'RATE';
+  metric.rate = parseFloat(record['Error %'].replace('%', ''));
+  metric.unit = '%';
+  setMetricStatus(transaction, metric, thresholds);
+  return metric;
+}
+
+/**
+ * @param {object} record 
+ * @param {Threshold[]} thresholds 
+ * @returns 
+ */
+function getDataSentMetric(transaction, record, thresholds) {
+  const metric = new Metric();
+  metric.name = 'Data Sent';
+  metric.type = 'COUNTER';
+  metric.rate = parseFloat(record['Sent KB/sec']);
+  metric.unit = 'KB/sec';
+  const samples = parseInt(record['# Samples']);
+  const throughput = parseFloat(record['Throughput']);
+  metric.sum = parseInt(metric.rate * ( samples * 1000 / throughput));
+  setMetricStatus(transaction, metric, thresholds);
+  return metric;
+}
+
+/**
+ * @param {object} record 
+ * @param {Threshold[]} thresholds 
+ * @returns 
+ */
+function getDataReceivedMetric(transaction, record, thresholds) {
+  const metric = new Metric();
+  metric.name = 'Data Received';
+  metric.type = 'COUNTER';
+  metric.rate = parseFloat(record['Received KB/sec']);
+  metric.unit = 'KB/sec';
+  const samples = parseInt(record['# Samples']);
+  const throughput = parseFloat(record['Throughput']);
+  metric.sum = parseInt(metric.rate * ( samples * 1000 / throughput));
+  setMetricStatus(transaction, metric, thresholds);
+  return metric;
+}
+
+function getResultFromJTLFile(file, thresholds) {
+  const results = aggregate(file);
+  const perf_result = getTransaction(new PerformanceTestResult(), results[results.length - 1], thresholds);
+  for (let i = 0; i < results.length - 1; i++) {
+    perf_result.transactions.push(getTransaction(new Transaction(), results[i], thresholds));
+  }
+  if (perf_result.status === 'PASS' && perf_result.transactions.some(_trans => _trans.status === 'FAIL')) {
+    perf_result.status = 'FAIL';
+  }
+  return perf_result;
+}
+
+module.exports = {
+  parse
+}
+
+/***/ }),
+
+/***/ 4873:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const phin = __nccwpck_require__(2728);
+
+/**
+ * @typedef {object} WrapperOptions
+ * @property {number} [retry] - max retries on failures - defaults to 1
+ * @property {number} [delay] - delay in ms between retries - defaults to 100ms
+ * @property {function} [retryStrategy] - custom retry strategy function
+ * @property {function} [delayStrategy] - custom delay strategy function
+ * @property {function} [errorStrategy] - custom error strategy function
+ * @property {object} [qs] - key-value pairs of query parameters
+ * @property {object} [auth] - auth object
+ * @property {string} auth.user - auth user
+ * @property {string} auth.pass - auth pass
+ * @property {object} [body] - body
+ * @property {boolean} [fullResponse] - resolve or reject with full response
+ */
+
+/**
+ * @typedef {phin.IJSONResponseOptions & WrapperOptions} RequestOptions
+ */
+
+class StatusCodeError extends Error {
+  constructor(response, fullResponse) {
+    super(`${response.statusCode} - ${helper.string(response.body)}`);
+    this.name = this.constructor.name;
+    this.statusCode = response.statusCode;
+    this.statusMessage = response.statusMessage;
+    this.body = helper.json(response.body);
+    if (fullResponse) {
+      this.response = response;
+    }
+  }
+}
+
+const strategies = {
+  
+  retry({response, error}) {
+    if (error) {
+      return true;
+    }
+    if (response.statusCode >= 500) {
+      return true;
+    }
+    return false;
+  },
+
+  delay({error, delay}) {
+    if (error && delay === defaults.delay) {
+      return defaults.networkErrorDelay;
+    }
+    return delay;
+  },
+
+  error({response, error}) {
+    if (error) {
+      return true;
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return true;
+    }
+    return false;
+  }
+
+};
+
+const defaults = {
+  retry: 1,
+  delay: 100,
+  networkErrorDelay: 1000,
+  retryStrategy: strategies.retry,
+  delayStrategy: strategies.delay,
+  errorStrategy: strategies.error
+};
+
+const helper = {
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  },
+
+  string(buffer) {
+    if (buffer instanceof Buffer) {
+      return buffer.toString();
+    }
+    return buffer;
+  },
+
+  json(data) {
+    try {
+      data = this.string(data);
+      return JSON.parse(data);
+    } catch (error) {
+      return data;
+    }
+  },
+
+  retry(options) {
+    return typeof options.retry === 'number' ? options.retry : defaults.retry;
+  },
+
+  delay(options) {
+    return typeof options.delay === 'number' ? options.delay : defaults.delay;
+  },
+
+  retryStrategy(options) {
+    return typeof options.retryStrategy === 'function' ? options.retryStrategy : defaults.retryStrategy;
+  },
+
+  delayStrategy(options) {
+    return typeof options.delayStrategy === 'function' ? options.delayStrategy : defaults.delayStrategy;
+  },
+
+  errorStrategy(options) {
+    return typeof options.errorStrategy === 'function' ? options.errorStrategy : defaults.errorStrategy;
+  },
+
+  qs(options) {
+    if (options.qs && typeof options.qs === 'object') {
+      const queries = [];
+      for (const key in options.qs) {
+        queries.push(`${key}=${options.qs[key]}`);
+      }
+      const queryUrl = queries.join('&');
+      options.url += `?${queryUrl}`;
+    }
+  },
+
+  auth(options) {
+    if (options.auth && typeof options.auth === 'object') {
+      if (options.core) {
+        options.core.auth = `${options.auth.user}:${options.auth.pass}`;
+      } else {
+        options.core = {
+          auth: `${options.auth.user}:${options.auth.pass}`
+        };
+      }
+    }
+  },
+
+  body(options) {
+    if (options.body) {
+      options.data = options.body;
+    }
+  },
+
+  delete(options) {
+    delete options.retry;
+    delete options.delay;
+    delete options.fullResponse;
+    delete options.qs;
+    delete options.auth;
+    delete options.body;
+    delete options.retryStrategy;
+    delete options.delayStrategy;
+    delete options.errorStrategy;
+  },
+
+  init(options) {
+    const retry = helper.retry(options);
+    const delay = helper.delay(options);
+    const retryStrategy = helper.retryStrategy(options);
+    const delayStrategy = helper.delayStrategy(options);
+    const errorStrategy = helper.errorStrategy(options);
+    const fullResponse = options.fullResponse || false;
+    helper.qs(options);
+    helper.auth(options);
+    helper.body(options);
+    helper.delete(options);
+    return { retry, delay, fullResponse, retryStrategy, delayStrategy, errorStrategy };
+  },
+
+  updateOptions({options, retry, delay, fullResponse, retryStrategy, errorStrategy}) {
+    options.retry = retry - 1;
+    options.delay = delay;
+    options.fullResponse = fullResponse;
+    options.retryStrategy = retryStrategy;
+    options.errorStrategy = errorStrategy;
+  },
+
+  reject(response, error, full) {
+    if (error) {
+      throw error;
+    }
+    throw new StatusCodeError(response, full);
+  },
+
+  resolve(response, full) {
+    if (full) {
+      return response;
+    } else {
+      return helper.json(response.body);
+    }
+  }
+
+};
+
+const request = {
+
+  defaults,
+  phin,
+
+  /**
+   * @param {RequestOptions} options
+   */
+  get(options) {
+    options.method = 'GET';
+    return this.__fetch(options);
+  },
+
+  /**
+   * @param {RequestOptions} options
+   */
+  post(options) {
+    options.method = 'POST';
+    return this.__fetch(options);
+  },
+
+  /**
+   * @param {RequestOptions} options
+   */
+  head(options) {
+    options.method = 'HEAD';
+    return this.__fetch(options);
+  },
+
+  /**
+   * @param {RequestOptions} options
+   */
+  patch(options) {
+    options.method = 'PATCH';
+    return this.__fetch(options);
+  },
+
+  /**
+   * @param {RequestOptions} options
+   */
+  put(options) {
+    options.method = 'PUT';
+    return this.__fetch(options);
+  },
+
+  /**
+   * @param {RequestOptions} options
+   */
+  delete(options) {
+    options.method = 'DELETE';
+    return this.__fetch(options);
+  },
+
+  /**
+   * @private
+   */
+  async __fetch(opts) {
+    const options = typeof opts === 'string' ? { url: opts, method: 'GET' } : opts;
+    const { retry, delay, fullResponse, retryStrategy, delayStrategy, errorStrategy } = helper.init(options);
+    let response, error;
+    try {
+      response = await phin(options);
+    } catch (err) {
+      error = err;
+    }
+    if (retryStrategy({response, error, options}) && retry > 0) {
+      helper.updateOptions({options, retry, delay, fullResponse, retryStrategy, errorStrategy});
+      await helper.sleep(delayStrategy({response, error, options, delay}));
+      return this[options.method.toLowerCase()](options);
+    }
+    if (errorStrategy({response, error, options})) {
+      return helper.reject(response, error, fullResponse);
+    } else {
+      return helper.resolve(response, fullResponse);
+    }
+  }
+
+};
+
+module.exports = request;
+
+/***/ }),
+
+/***/ 2728:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const {URL} = __nccwpck_require__(7016)
+
+const centra = __nccwpck_require__(3866)
+
+const unspecifiedFollowRedirectsDefault = 20
+
+/**
+* phin options object. phin also supports all options from <a href="https://nodejs.org/api/http.html#http_http_request_options_callback">http.request(options, callback)</a> by passing them on to this method (or similar).
+* @typedef {Object} phinOptions
+* @property {string} url - URL to request (autodetect infers from this URL)
+* @property {string} [method=GET] - Request method ('GET', 'POST', etc.)
+* @property {string|Buffer|object} [data] - Data to send as request body (phin may attempt to convert this data to a string if it isn't already)
+* @property {Object} [form] - Object to send as form data (sets 'Content-Type' and 'Content-Length' headers, as well as request body) (overwrites 'data' option if present)
+* @property {Object} [headers={}] - Request headers
+* @property {Object} [core={}] - Custom core HTTP options
+* @property {string} [parse=none] - Response parsing. Errors will be given if the response can't be parsed. 'none' returns body as a `Buffer`, 'json' attempts to parse the body as JSON, and 'string' attempts to parse the body as a string
+* @property {boolean} [followRedirects=false] - Enable HTTP redirect following
+* @property {boolean} [stream=false] - Enable streaming of response. (Removes body property)
+* @property {boolean} [compression=false] - Enable compression for request
+* @property {?number} [timeout=null] - Request timeout in milliseconds
+* @property {string} [hostname=autodetect] - URL hostname
+* @property {Number} [port=autodetect] - URL port
+* @property {string} [path=autodetect] - URL path
+*/
+
+/**
+* Response data
+* @callback phinResponseCallback
+* @param {?(Error|string)} error - Error if any occurred in request, otherwise null.
+* @param {?http.serverResponse} phinResponse - phin response object. Like <a href='https://nodejs.org/api/http.html#http_class_http_serverresponse'>http.ServerResponse</a> but has a body property containing response body, unless stream. If stream option is enabled, a stream property will be provided to callback with a readable stream.
+*/
+
+/**
+* Sends an HTTP request
+* @param {phinOptions|string} options - phin options object (or string for auto-detection)
+* @returns {Promise<http.serverResponse>} - phin-adapted response object
+*/
+const phin = async (opts) => {
+	if (typeof(opts) !== 'string') {
+		if (!opts.hasOwnProperty('url')) {
+			throw new Error('Missing url option from options for request method.')
+		}
+	}
+
+	const req = centra(typeof opts === 'object' ? opts.url : opts, opts.method || 'GET')
+
+	if (opts.headers) req.header(opts.headers)
+	if (opts.stream) req.stream()
+	if (opts.timeout) req.timeout(opts.timeout)
+	if (opts.data) req.body(opts.data)
+	if (opts.form) req.body(opts.form, 'form')
+	if (opts.compression) req.compress()
+
+	if (opts.followRedirects) {
+		if (opts.followRedirects === true) {
+			req.followRedirects(unspecifiedFollowRedirectsDefault)
+		} else if (typeof opts.followRedirects === 'number') {
+			req.followRedirects(opts.followRedirects)
+		}
+	}
+
+	if (typeof opts.core === 'object') {
+		Object.keys(opts.core).forEach((optName) => {
+			req.option(optName, opts.core[optName])
+		})
+	}
+
+	const res = await req.send()
+
+	if (opts.stream) {
+		res.stream = res
+
+		return res
+	}
+	else {
+		res.coreRes.body = res.body
+
+		if (opts.parse) {
+			if (opts.parse === 'json') {
+				res.coreRes.body = await res.json()
+	
+				return res.coreRes
+			}
+			else if (opts.parse === 'string') {
+				res.coreRes.body = res.coreRes.body.toString()
+
+				return res.coreRes
+			}
+		}
+		
+		return res.coreRes
+	}
+}
+
+// If we're running Node.js 8+, let's promisify it
+
+phin.promisified = phin
+
+phin.unpromisified = (opts, cb) => {
+	phin(opts).then((data) => {
+		if (cb) cb(null, data)
+	}).catch((err) => {
+		if (cb) cb(err, null)
+	})
+}
+
+// Defaults
+
+phin.defaults = (defaultOpts) => async (opts) => {
+	const nops = typeof opts === 'string' ? {'url': opts} : opts
+
+	Object.keys(defaultOpts).forEach((doK) => {
+		if (!nops.hasOwnProperty(doK) || nops[doK] === null) {
+			nops[doK] = defaultOpts[doK]
+		}
+	})
+
+	return await phin(nops)
+}
+
+module.exports = phin
+
+
+/***/ }),
+
+/***/ 2439:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const parseMilliseconds = __nccwpck_require__(3222);
+
+const pluralize = (word, count) => count === 1 ? word : `${word}s`;
+
+const SECOND_ROUNDING_EPSILON = 0.0000001;
+
+module.exports = (milliseconds, options = {}) => {
+	if (!Number.isFinite(milliseconds)) {
+		throw new TypeError('Expected a finite number');
+	}
+
+	if (options.colonNotation) {
+		options.compact = false;
+		options.formatSubMilliseconds = false;
+		options.separateMilliseconds = false;
+		options.verbose = false;
+	}
+
+	if (options.compact) {
+		options.secondsDecimalDigits = 0;
+		options.millisecondsDecimalDigits = 0;
+	}
+
+	const result = [];
+
+	const floorDecimals = (value, decimalDigits) => {
+		const flooredInterimValue = Math.floor((value * (10 ** decimalDigits)) + SECOND_ROUNDING_EPSILON);
+		const flooredValue = Math.round(flooredInterimValue) / (10 ** decimalDigits);
+		return flooredValue.toFixed(decimalDigits);
+	};
+
+	const add = (value, long, short, valueString) => {
+		if ((result.length === 0 || !options.colonNotation) && value === 0 && !(options.colonNotation && short === 'm')) {
+			return;
+		}
+
+		valueString = (valueString || value || '0').toString();
+		let prefix;
+		let suffix;
+		if (options.colonNotation) {
+			prefix = result.length > 0 ? ':' : '';
+			suffix = '';
+			const wholeDigits = valueString.includes('.') ? valueString.split('.')[0].length : valueString.length;
+			const minLength = result.length > 0 ? 2 : 1;
+			valueString = '0'.repeat(Math.max(0, minLength - wholeDigits)) + valueString;
+		} else {
+			prefix = '';
+			suffix = options.verbose ? ' ' + pluralize(long, value) : short;
+		}
+
+		result.push(prefix + valueString + suffix);
+	};
+
+	const parsed = parseMilliseconds(milliseconds);
+
+	add(Math.trunc(parsed.days / 365), 'year', 'y');
+	add(parsed.days % 365, 'day', 'd');
+	add(parsed.hours, 'hour', 'h');
+	add(parsed.minutes, 'minute', 'm');
+
+	if (
+		options.separateMilliseconds ||
+		options.formatSubMilliseconds ||
+		(!options.colonNotation && milliseconds < 1000)
+	) {
+		add(parsed.seconds, 'second', 's');
+		if (options.formatSubMilliseconds) {
+			add(parsed.milliseconds, 'millisecond', 'ms');
+			add(parsed.microseconds, 'microsecond', 'µs');
+			add(parsed.nanoseconds, 'nanosecond', 'ns');
+		} else {
+			const millisecondsAndBelow =
+				parsed.milliseconds +
+				(parsed.microseconds / 1000) +
+				(parsed.nanoseconds / 1e6);
+
+			const millisecondsDecimalDigits =
+				typeof options.millisecondsDecimalDigits === 'number' ?
+					options.millisecondsDecimalDigits :
+					0;
+
+			const roundedMiliseconds = millisecondsAndBelow >= 1 ?
+				Math.round(millisecondsAndBelow) :
+				Math.ceil(millisecondsAndBelow);
+
+			const millisecondsString = millisecondsDecimalDigits ?
+				millisecondsAndBelow.toFixed(millisecondsDecimalDigits) :
+				roundedMiliseconds;
+
+			add(
+				Number.parseFloat(millisecondsString, 10),
+				'millisecond',
+				'ms',
+				millisecondsString
+			);
+		}
+	} else {
+		const seconds = (milliseconds / 1000) % 60;
+		const secondsDecimalDigits =
+			typeof options.secondsDecimalDigits === 'number' ?
+				options.secondsDecimalDigits :
+				1;
+		const secondsFixed = floorDecimals(seconds, secondsDecimalDigits);
+		const secondsString = options.keepDecimalsOnWholeSeconds ?
+			secondsFixed :
+			secondsFixed.replace(/\.0+$/, '');
+		add(Number.parseFloat(secondsString, 10), 'second', 's', secondsString);
+	}
+
+	if (result.length === 0) {
+		return '0' + (options.verbose ? ' milliseconds' : 'ms');
+	}
+
+	if (options.compact) {
+		return result[0];
+	}
+
+	if (typeof options.unitCount === 'number') {
+		const separator = options.colonNotation ? '' : ' ';
+		return result.slice(0, Math.max(options.unitCount, 1)).join(separator);
+	}
+
+	return options.colonNotation ? result.join('') : result.join(' ');
+};
+
+
+/***/ }),
+
+/***/ 5546:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+module.exports = __nccwpck_require__(7084);
+
+/***/ }),
+
+/***/ 7084:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+var RetryOperation = __nccwpck_require__(9538);
+
+exports.operation = function(options) {
+  var timeouts = exports.timeouts(options);
+  return new RetryOperation(timeouts, {
+      forever: options && (options.forever || options.retries === Infinity),
+      unref: options && options.unref,
+      maxRetryTime: options && options.maxRetryTime
+  });
+};
+
+exports.timeouts = function(options) {
+  if (options instanceof Array) {
+    return [].concat(options);
+  }
+
+  var opts = {
+    retries: 10,
+    factor: 2,
+    minTimeout: 1 * 1000,
+    maxTimeout: Infinity,
+    randomize: false
+  };
+  for (var key in options) {
+    opts[key] = options[key];
+  }
+
+  if (opts.minTimeout > opts.maxTimeout) {
+    throw new Error('minTimeout is greater than maxTimeout');
+  }
+
+  var timeouts = [];
+  for (var i = 0; i < opts.retries; i++) {
+    timeouts.push(this.createTimeout(i, opts));
+  }
+
+  if (options && options.forever && !timeouts.length) {
+    timeouts.push(this.createTimeout(i, opts));
+  }
+
+  // sort the array numerically ascending
+  timeouts.sort(function(a,b) {
+    return a - b;
+  });
+
+  return timeouts;
+};
+
+exports.createTimeout = function(attempt, opts) {
+  var random = (opts.randomize)
+    ? (Math.random() + 1)
+    : 1;
+
+  var timeout = Math.round(random * Math.max(opts.minTimeout, 1) * Math.pow(opts.factor, attempt));
+  timeout = Math.min(timeout, opts.maxTimeout);
+
+  return timeout;
+};
+
+exports.wrap = function(obj, options, methods) {
+  if (options instanceof Array) {
+    methods = options;
+    options = null;
+  }
+
+  if (!methods) {
+    methods = [];
+    for (var key in obj) {
+      if (typeof obj[key] === 'function') {
+        methods.push(key);
+      }
+    }
+  }
+
+  for (var i = 0; i < methods.length; i++) {
+    var method   = methods[i];
+    var original = obj[method];
+
+    obj[method] = function retryWrapper(original) {
+      var op       = exports.operation(options);
+      var args     = Array.prototype.slice.call(arguments, 1);
+      var callback = args.pop();
+
+      args.push(function(err) {
+        if (op.retry(err)) {
+          return;
+        }
+        if (err) {
+          arguments[0] = op.mainError();
+        }
+        callback.apply(this, arguments);
+      });
+
+      op.attempt(function() {
+        original.apply(obj, args);
+      });
+    }.bind(obj, original);
+    obj[method].options = options;
+  }
+};
+
+
+/***/ }),
+
+/***/ 9538:
+/***/ ((module) => {
+
+function RetryOperation(timeouts, options) {
+  // Compatibility for the old (timeouts, retryForever) signature
+  if (typeof options === 'boolean') {
+    options = { forever: options };
+  }
+
+  this._originalTimeouts = JSON.parse(JSON.stringify(timeouts));
+  this._timeouts = timeouts;
+  this._options = options || {};
+  this._maxRetryTime = options && options.maxRetryTime || Infinity;
+  this._fn = null;
+  this._errors = [];
+  this._attempts = 1;
+  this._operationTimeout = null;
+  this._operationTimeoutCb = null;
+  this._timeout = null;
+  this._operationStart = null;
+  this._timer = null;
+
+  if (this._options.forever) {
+    this._cachedTimeouts = this._timeouts.slice(0);
+  }
+}
+module.exports = RetryOperation;
+
+RetryOperation.prototype.reset = function() {
+  this._attempts = 1;
+  this._timeouts = this._originalTimeouts.slice(0);
+}
+
+RetryOperation.prototype.stop = function() {
+  if (this._timeout) {
+    clearTimeout(this._timeout);
+  }
+  if (this._timer) {
+    clearTimeout(this._timer);
+  }
+
+  this._timeouts       = [];
+  this._cachedTimeouts = null;
+};
+
+RetryOperation.prototype.retry = function(err) {
+  if (this._timeout) {
+    clearTimeout(this._timeout);
+  }
+
+  if (!err) {
+    return false;
+  }
+  var currentTime = new Date().getTime();
+  if (err && currentTime - this._operationStart >= this._maxRetryTime) {
+    this._errors.push(err);
+    this._errors.unshift(new Error('RetryOperation timeout occurred'));
+    return false;
+  }
+
+  this._errors.push(err);
+
+  var timeout = this._timeouts.shift();
+  if (timeout === undefined) {
+    if (this._cachedTimeouts) {
+      // retry forever, only keep last error
+      this._errors.splice(0, this._errors.length - 1);
+      timeout = this._cachedTimeouts.slice(-1);
+    } else {
+      return false;
+    }
+  }
+
+  var self = this;
+  this._timer = setTimeout(function() {
+    self._attempts++;
+
+    if (self._operationTimeoutCb) {
+      self._timeout = setTimeout(function() {
+        self._operationTimeoutCb(self._attempts);
+      }, self._operationTimeout);
+
+      if (self._options.unref) {
+          self._timeout.unref();
+      }
+    }
+
+    self._fn(self._attempts);
+  }, timeout);
+
+  if (this._options.unref) {
+      this._timer.unref();
+  }
+
+  return true;
+};
+
+RetryOperation.prototype.attempt = function(fn, timeoutOps) {
+  this._fn = fn;
+
+  if (timeoutOps) {
+    if (timeoutOps.timeout) {
+      this._operationTimeout = timeoutOps.timeout;
+    }
+    if (timeoutOps.cb) {
+      this._operationTimeoutCb = timeoutOps.cb;
+    }
+  }
+
+  var self = this;
+  if (this._operationTimeoutCb) {
+    this._timeout = setTimeout(function() {
+      self._operationTimeoutCb();
+    }, self._operationTimeout);
+  }
+
+  this._operationStart = new Date().getTime();
+
+  this._fn(this._attempts);
+};
+
+RetryOperation.prototype.try = function(fn) {
+  console.log('Using RetryOperation.try() is deprecated');
+  this.attempt(fn);
+};
+
+RetryOperation.prototype.start = function(fn) {
+  console.log('Using RetryOperation.start() is deprecated');
+  this.attempt(fn);
+};
+
+RetryOperation.prototype.start = RetryOperation.prototype.try;
+
+RetryOperation.prototype.errors = function() {
+  return this._errors;
+};
+
+RetryOperation.prototype.attempts = function() {
+  return this._attempts;
+};
+
+RetryOperation.prototype.mainError = function() {
+  if (this._errors.length === 0) {
+    return null;
+  }
+
+  var counts = {};
+  var mainError = null;
+  var mainErrorCount = 0;
+
+  for (var i = 0; i < this._errors.length; i++) {
+    var error = this._errors[i];
+    var message = error.message;
+    var count = (counts[message] || 0) + 1;
+
+    counts[message] = count;
+
+    if (count >= mainErrorCount) {
+      mainError = error;
+      mainErrorCount = count;
+    }
+  }
+
+  return mainError;
+};
+
+
+/***/ }),
+
+/***/ 3855:
+/***/ (() => {
+
+const MILLISECONDS_PER_DAY = 1000 * 60 * 60 * 24;
+
+Date.prototype.getWOY = function () {
+  const d = new Date(Date.UTC(this.getFullYear(), this.getMonth(), this.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / MILLISECONDS_PER_DAY) + 1) / 7)
+};
+
+Date.prototype.getDOY = function () {
+  const yearStart = new Date(this.getFullYear(), 0, 1);
+  return Math.ceil((this - yearStart) / MILLISECONDS_PER_DAY);
+}
+
+/***/ }),
+
+/***/ 6469:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+__nccwpck_require__(3855);
+
+/**
+ * get on call person
+ * @param {import('./index').Schedule} schedule 
+ */
+function getOnCallPerson(schedule) {
+  const layer = getLayer(schedule.layers);
+  return getLayerUser(layer);
+}
+
+/**
+ * @param {import('./index').Layer[]} layers 
+ */
+function getLayer(layers) {
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const layer = layers[i];
+    if (!layer.start && !layer.end) {
+      return layer;
+    }
+    const current_time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    if (!layer.start && current_time < layer.end) {
+      return layer;
+    }
+    if (!layer.end && current_time > layer.start) {
+      return layer;
+    }
+    if (current_time < layer.end && current_time > layer.start) {
+      return layer;
+    }
+  }
+}
+
+/**
+ * @param {import('./index').Layer} layer
+ */
+function getLayerUser(layer) {
+  if (layer.user) {
+    return layer.user;
+  }
+  const rotation = layer.rotation;
+  const today = new Date();
+  switch (rotation.every) {
+    case 'day':
+      return getUser(rotation.users, today.getDOY() % rotation.users.length);
+    default:
+      return getUser(rotation.users, today.getWOY() % rotation.users.length);
+  }
+}
+
+/**
+ * @param {import('./index').User[]} users 
+ * @param {number} index 
+ */
+function getUser(users, index) {
+  let count = 0;
+  while (count < users.length) {
+    const user = users[index];
+    if (user.enable === false) {
+      index = (index + 1) % users.length;
+      count++;
+    } else {
+      return user;
+    }
+  }
+  return users[index]
+}
+
+module.exports = {
+  getOnCallPerson
+}
+
+/***/ }),
+
+/***/ 6496:
+/***/ ((module) => {
+
+const hexRegex = /^[-+]?0x[a-fA-F0-9]+$/;
+const numRegex = /^([\-\+])?(0*)(\.[0-9]+([eE]\-?[0-9]+)?|[0-9]+(\.[0-9]+([eE]\-?[0-9]+)?)?)$/;
+// const octRegex = /0x[a-z0-9]+/;
+// const binRegex = /0x[a-z0-9]+/;
+
+
+//polyfill
+if (!Number.parseInt && window.parseInt) {
+    Number.parseInt = window.parseInt;
+}
+if (!Number.parseFloat && window.parseFloat) {
+    Number.parseFloat = window.parseFloat;
+}
+
+  
+const consider = {
+    hex :  true,
+    leadingZeros: true,
+    decimalPoint: "\.",
+    eNotation: true
+    //skipLike: /regex/
+};
+
+function toNumber(str, options = {}){
+    // const options = Object.assign({}, consider);
+    // if(opt.leadingZeros === false){
+    //     options.leadingZeros = false;
+    // }else if(opt.hex === false){
+    //     options.hex = false;
+    // }
+
+    options = Object.assign({}, consider, options );
+    if(!str || typeof str !== "string" ) return str;
+    
+    let trimmedStr  = str.trim();
+    // if(trimmedStr === "0.0") return 0;
+    // else if(trimmedStr === "+0.0") return 0;
+    // else if(trimmedStr === "-0.0") return -0;
+
+    if(options.skipLike !== undefined && options.skipLike.test(trimmedStr)) return str;
+    else if (options.hex && hexRegex.test(trimmedStr)) {
+        return Number.parseInt(trimmedStr, 16);
+    // } else if (options.parseOct && octRegex.test(str)) {
+    //     return Number.parseInt(val, 8);
+    // }else if (options.parseBin && binRegex.test(str)) {
+    //     return Number.parseInt(val, 2);
+    }else{
+        //separate negative sign, leading zeros, and rest number
+        const match = numRegex.exec(trimmedStr);
+        if(match){
+            const sign = match[1];
+            const leadingZeros = match[2];
+            let numTrimmedByZeros = trimZeros(match[3]); //complete num without leading zeros
+            //trim ending zeros for floating number
+            
+            const eNotation = match[4] || match[6];
+            if(!options.leadingZeros && leadingZeros.length > 0 && sign && trimmedStr[2] !== ".") return str; //-0123
+            else if(!options.leadingZeros && leadingZeros.length > 0 && !sign && trimmedStr[1] !== ".") return str; //0123
+            else{//no leading zeros or leading zeros are allowed
+                const num = Number(trimmedStr);
+                const numStr = "" + num;
+                if(numStr.search(/[eE]/) !== -1){ //given number is long and parsed to eNotation
+                    if(options.eNotation) return num;
+                    else return str;
+                }else if(eNotation){ //given number has enotation
+                    if(options.eNotation) return num;
+                    else return str;
+                }else if(trimmedStr.indexOf(".") !== -1){ //floating number
+                    // const decimalPart = match[5].substr(1);
+                    // const intPart = trimmedStr.substr(0,trimmedStr.indexOf("."));
+
+                    
+                    // const p = numStr.indexOf(".");
+                    // const givenIntPart = numStr.substr(0,p);
+                    // const givenDecPart = numStr.substr(p+1);
+                    if(numStr === "0" && (numTrimmedByZeros === "") ) return num; //0.0
+                    else if(numStr === numTrimmedByZeros) return num; //0.456. 0.79000
+                    else if( sign && numStr === "-"+numTrimmedByZeros) return num;
+                    else return str;
+                }
+                
+                if(leadingZeros){
+                    // if(numTrimmedByZeros === numStr){
+                    //     if(options.leadingZeros) return num;
+                    //     else return str;
+                    // }else return str;
+                    if(numTrimmedByZeros === numStr) return num;
+                    else if(sign+numTrimmedByZeros === numStr) return num;
+                    else return str;
+                }
+
+                if(trimmedStr === numStr) return num;
+                else if(trimmedStr === sign+numStr) return num;
+                // else{
+                //     //number with +/- sign
+                //     trimmedStr.test(/[-+][0-9]);
+
+                // }
+                return str;
+            }
+            // else if(!eNotation && trimmedStr && trimmedStr !== Number(trimmedStr) ) return str;
+            
+        }else{ //non-numeric string
+            return str;
+        }
+    }
+}
+
+/**
+ * 
+ * @param {string} numStr without leading zeros
+ * @returns 
+ */
+function trimZeros(numStr){
+    if(numStr && numStr.indexOf(".") !== -1){//float
+        numStr = numStr.replace(/0+$/, ""); //remove ending zeros
+        if(numStr === ".")  numStr = "0";
+        else if(numStr[0] === ".")  numStr = "0"+numStr;
+        else if(numStr[numStr.length-1] === ".")  numStr = numStr.substr(0,numStr.length-1);
+        return numStr;
+    }
+    return numStr;
+}
+module.exports = toNumber
+
+
+/***/ }),
+
+/***/ 1450:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const os = __nccwpck_require__(857);
+const tty = __nccwpck_require__(2018);
+const hasFlag = __nccwpck_require__(3813);
+
+const {env} = process;
+
+let forceColor;
+if (hasFlag('no-color') ||
+	hasFlag('no-colors') ||
+	hasFlag('color=false') ||
+	hasFlag('color=never')) {
+	forceColor = 0;
+} else if (hasFlag('color') ||
+	hasFlag('colors') ||
+	hasFlag('color=true') ||
+	hasFlag('color=always')) {
+	forceColor = 1;
+}
+
+if ('FORCE_COLOR' in env) {
+	if (env.FORCE_COLOR === 'true') {
+		forceColor = 1;
+	} else if (env.FORCE_COLOR === 'false') {
+		forceColor = 0;
+	} else {
+		forceColor = env.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env.FORCE_COLOR, 10), 3);
+	}
+}
+
+function translateLevel(level) {
+	if (level === 0) {
+		return false;
+	}
+
+	return {
+		level,
+		hasBasic: true,
+		has256: level >= 2,
+		has16m: level >= 3
+	};
+}
+
+function supportsColor(haveStream, streamIsTTY) {
+	if (forceColor === 0) {
+		return 0;
+	}
+
+	if (hasFlag('color=16m') ||
+		hasFlag('color=full') ||
+		hasFlag('color=truecolor')) {
+		return 3;
+	}
+
+	if (hasFlag('color=256')) {
+		return 2;
+	}
+
+	if (haveStream && !streamIsTTY && forceColor === undefined) {
+		return 0;
+	}
+
+	const min = forceColor || 0;
+
+	if (env.TERM === 'dumb') {
+		return min;
+	}
+
+	if (process.platform === 'win32') {
+		// Windows 10 build 10586 is the first Windows release that supports 256 colors.
+		// Windows 10 build 14931 is the first release that supports 16m/TrueColor.
+		const osRelease = os.release().split('.');
+		if (
+			Number(osRelease[0]) >= 10 &&
+			Number(osRelease[2]) >= 10586
+		) {
+			return Number(osRelease[2]) >= 14931 ? 3 : 2;
+		}
+
+		return 1;
+	}
+
+	if ('CI' in env) {
+		if (['TRAVIS', 'CIRCLECI', 'APPVEYOR', 'GITLAB_CI', 'GITHUB_ACTIONS', 'BUILDKITE'].some(sign => sign in env) || env.CI_NAME === 'codeship') {
+			return 1;
+		}
+
+		return min;
+	}
+
+	if ('TEAMCITY_VERSION' in env) {
+		return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+	}
+
+	if (env.COLORTERM === 'truecolor') {
+		return 3;
+	}
+
+	if ('TERM_PROGRAM' in env) {
+		const version = parseInt((env.TERM_PROGRAM_VERSION || '').split('.')[0], 10);
+
+		switch (env.TERM_PROGRAM) {
+			case 'iTerm.app':
+				return version >= 3 ? 3 : 2;
+			case 'Apple_Terminal':
+				return 2;
+			// No default
+		}
+	}
+
+	if (/-256(color)?$/i.test(env.TERM)) {
+		return 2;
+	}
+
+	if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+		return 1;
+	}
+
+	if ('COLORTERM' in env) {
+		return 1;
+	}
+
+	return min;
+}
+
+function getSupportLevel(stream) {
+	const level = supportsColor(stream, stream && stream.isTTY);
+	return translateLevel(level);
+}
+
+module.exports = {
+	supportsColor: getSupportLevel,
+	stdout: translateLevel(supportsColor(true, tty.isatty(1))),
+	stderr: translateLevel(supportsColor(true, tty.isatty(2)))
+};
+
+
+/***/ }),
+
+/***/ 944:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const fs = __nccwpck_require__(9896);
+const path = __nccwpck_require__(6928);
+const { totalist } = __nccwpck_require__(339);
+const globrex = __nccwpck_require__(617);
+const { XMLParser } = __nccwpck_require__(9741);
+
+
+/**
+ * fast xml parser v4's default behavior is to return an object if there is only one element
+ * in the array. This is not desirable for our use case. We sometimes want to force an array
+ * these are the keys to which that is required.
+ * @type {string[]}
+ */
+const FORCED_ARRAY_KEYS = [
+  "testsuites",
+  "testsuites.testsuite",
+  "testsuites.testsuite.testcase",
+  "testsuites.testsuite.testcase.failure",
+  "testsuites.testsuite.testcase.error",
+  "testsuites.testsuite.testcase.system-err",
+  "testsuites.testsuite.testcase.properties.property",
+  "assemblies",
+  "assemblies.assembly",
+  "assemblies.assembly.collection",
+  "assemblies.assembly.collection.test",
+  "assemblies.assembly.collection.test.failure",
+  "assemblies.assembly.collection.test.traits.trait",
+  "testng-results",
+  "testng-results.suite",
+  "testng-results.suite.groups.group",
+  "testng-results.suite.groups.group.method",
+  "testng-results.suite.test",
+  "testng-results.suite.test.class",
+  "testng-results.suite.test.class.test-method",
+  "testng-results.suite.test.class.test-method.exception",
+  "TestRun.Results.UnitTestResult",
+  "TestRun.Results.UnitTestResult.ResultFiles.ResultFile",
+  "TestRun.TestDefinitions.UnitTest",
+  "TestRun.TestDefinitions.UnitTest.Properties.Property",
+  "TestRun.TestDefinitions.UnitTest.TestCategory.TestCategoryItem"
+];
+
+const configured_parser = new XMLParser({
+  isArray: (name, jpath, isLeafNode, isAttribute) => {
+    if( FORCED_ARRAY_KEYS.indexOf(jpath) !== -1) {
+      return true;
+    }
+    // handle nunit deep hierarchy
+    else if (jpath.startsWith("test-results") || jpath.startsWith("test-run")) {
+      let parts = jpath.split(".");
+      switch(parts[parts.length - 1]) {
+        case "category":
+        case "property":
+        case "test-suite":
+        case "test-case":
+        case "attachment":
+          return true;
+        default:
+          return false;
+      }
+    }
+  },
+  ignoreAttributes: false,
+  parseAttributeValue: true,
+});
+
+function resolveFilePath(filePath) {
+  const cwd = process.cwd();
+  return path.isAbsolute(filePath) ? filePath : path.join(cwd, filePath);
+}
+
+function getJsonFromXMLFile(filePath) {
+  const xml = fs.readFileSync(resolveFilePath(filePath)).toString();
+  return configured_parser.parse(xml);
+}
+
+/**
+ * @param {string} file_path
+ */
+function getMatchingFilePaths(file_path) {
+  if (file_path.includes('*')) {
+    const file_paths = [];
+    const result = globrex(file_path);
+    const dir_name = path.dirname(file_path.substring(0, file_path.indexOf('*') + 1));
+    totalist(dir_name, (name) => {
+      const current_file_path = `${dir_name}/${name}`;
+      if (result.regex.test(current_file_path)) {
+        file_paths.push(current_file_path);
+      }
+    });
+    return file_paths;
+  }
+  return [file_path];
+}
+
+/**
+ *
+ * @param {string} value
+ */
+function decodeIfEncoded(value) {
+  if (!value) {
+    return value;
+  }
+  try {
+    if (value.length % 4 !== 0) {
+      return value;
+    }
+    const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+    if (!base64Regex.test(value)) {
+      return value;
+    }
+    return atob(value);
+  } catch (error) {
+    return value;
+  }
+}
+
+/**
+ *
+ * @param {string} value
+ * @returns
+ */
+function isEncoded(value) {
+  if (!value) {
+    return false;
+  }
+  try {
+    if (value.length % 4 !== 0) {
+      return false;
+    }
+    const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+    if (!base64Regex.test(value)) {
+      return false;
+    }
+    atob(value);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
+ *
+ * @param {string} value
+ */
+function isFilePath(value) {
+  try {
+    fs.statSync(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+  *
+  * @param {string} file_name
+  * @param {string} file_data
+  * @param {string} file_type
+  */
+function saveAttachmentToDisk(file_name, file_data, file_type) {
+  const folder_path = path.join(process.cwd(), '.testbeats', 'attachments');
+  fs.mkdirSync(folder_path, { recursive: true });
+  let data = file_data;
+  if (isEncoded(file_data)) {
+    data = Buffer.from(file_data, 'base64');
+  } else {
+    return '';
+  }
+
+  const file_path = path.join(folder_path, file_name);
+  let relative_file_path = path.relative(process.cwd(), file_path);
+  if (file_type.includes('png')) {
+    relative_file_path = `${relative_file_path}.png`;
+    fs.writeFileSync(relative_file_path, data);
+  } else if (file_type.includes('jpeg')) {
+    relative_file_path = `${relative_file_path}.jpeg`;
+    fs.writeFileSync(relative_file_path, data);
+  } else if (file_type.includes('json')) {
+    relative_file_path = `${relative_file_path}.json`;
+    fs.writeFileSync(relative_file_path, data);
+  } else {
+    return '';
+  }
+  return relative_file_path;
+}
+
+module.exports = {
+  getJsonFromXMLFile,
+  getMatchingFilePaths,
+  resolveFilePath,
+  decodeIfEncoded,
+  isFilePath,
+  saveAttachmentToDisk
+}
+
+
+/***/ }),
+
+/***/ 4968:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const parser = __nccwpck_require__(7999);
+
+function parse(options) {
+  return parser.parse(options);
+}
+
+function parseV2(options) {
+  return parser.parseV2(options);
+}
+
+module.exports = {
+  parse,
+  parseV2
+}
+
+/***/ }),
+
+/***/ 9662:
+/***/ ((module) => {
+
+class TestAttachment {
+
+  constructor() {
+    this.name = '';
+    this.path = '';
+  }
+
+}
+
+module.exports = TestAttachment;
+
+/***/ }),
+
+/***/ 1819:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { unescape } = __nccwpck_require__(180);
+
+class TestCase {
+
+    constructor() {
+      this.id = '';
+      this.name = '';
+      this.total = 0;
+      this.passed = 0;
+      this.failed = 0;
+      this.errors = 0;
+      this.skipped = 0;
+      this.duration = 0;
+      this.status = 'NA';
+      this.failure = '';
+      this.stack_trace = '';
+      this.tags = [];
+      this.metadata = {};
+
+      this.steps = [];
+      this.attachments = [];
+    }
+
+    setFailure(value) {
+      this.failure = value ? unescape(value) : value;
+    }
+
+  }
+
+  module.exports = TestCase;
+
+/***/ }),
+
+/***/ 2658:
+/***/ ((module) => {
+
+class TestResult {
+
+  constructor() {
+    this.id = '';
+    this.name = '';
+    this.total = 0;
+    this.passed = 0;
+    this.failed = 0;
+    this.errors = 0;
+    this.skipped = 0;
+    this.retried = 0;
+    this.duration = 0;
+    this.status = 'NA';
+    this.tags = [];
+    this.metadata = {};
+
+    this.suites = [];
+  }
+}
+
+module.exports = TestResult;
+
+/***/ }),
+
+/***/ 8165:
+/***/ ((module) => {
+
+class TestStep {
+
+  constructor() {
+    this.id = '';
+    this.name = '';
+    this.duration = 0;
+    this.status = 'NA';
+    this.failure = '';
+    this.stack_trace = '';
+  }
+
+}
+
+module.exports = TestStep;
+
+/***/ }),
+
+/***/ 9275:
+/***/ ((module) => {
+
+class TestSuite {
+
+  constructor() {
+    this.id = '';
+    this.name = '';
+    this.total = 0;
+    this.passed = 0;
+    this.failed = 0;
+    this.errors = 0;
+    this.skipped = 0;
+    this.duration = 0;
+    this.status = 'NA';
+    this.tags = [];
+    this.metadata = {};
+
+    this.cases = [];
+  }
+
+}
+
+module.exports = TestSuite;
+
+/***/ }),
+
+/***/ 9797:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { unescape } = __nccwpck_require__(180);
+
+
+class BaseParser {
+
+  /**
+   *
+   * @param {string} value
+   * @returns
+   */
+  parseStatus(value) {
+    if (value === 'passed' || value === 'PASSED') {
+      return 'PASS';
+    }
+    if (value === 'failed' || value === 'FAILED') {
+      return 'FAIL';
+    }
+    if (value === 'skipped' || value === 'SKIPPED') {
+      return 'SKIP';
+    }
+    return 'FAIL';
+  }
+
+  /**
+   * @param {string} value
+   * @returns
+   */
+  parseText(value) {
+    return value ? unescape(value) : value;
+  }
+
+  /**
+   *
+   * @param {string[]} parent_tags
+   * @param {string[]} child_tags
+   */
+  mergeTags(parent_tags, child_tags) {
+    if (!parent_tags) {
+      parent_tags = [];
+    }
+    if (!child_tags) {
+      child_tags = [];
+    }
+    for (const tag of parent_tags) {
+      if (child_tags.indexOf(tag) === -1) {
+        child_tags.push(tag);
+      }
+    }
+  }
+
+  mergeMetadata(parent_metadata, child_metadata) {
+    if (!parent_metadata) {
+      parent_metadata = {};
+    }
+    if (!child_metadata) {
+      child_metadata = {};
+    }
+    for (const [key, value] of Object.entries(parent_metadata)) {
+      if (!child_metadata[key]) {
+        child_metadata[key] = value;
+      }
+    }
+  }
+}
+
+module.exports = { BaseParser }
+
+/***/ }),
+
+/***/ 9991:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const path = __nccwpck_require__(6928);
+const fs = __nccwpck_require__(9896);
+const { resolveFilePath, decodeIfEncoded, isFilePath, saveAttachmentToDisk } = __nccwpck_require__(944);
+
+const TestResult = __nccwpck_require__(2658);
+const TestSuite = __nccwpck_require__(9275);
+const TestCase = __nccwpck_require__(1819);
+const TestStep = __nccwpck_require__(8165);
+const { BaseParser } = __nccwpck_require__(9797);
+const TestAttachment = __nccwpck_require__(9662);
+
+class CucumberParser extends BaseParser {
+
+  constructor(file) {
+    super();
+    this.result = new TestResult();
+    this.raw_result = this.#getCucumberResult(file);
+  }
+
+  /**
+   * @returns {import('./cucumber.result').CucumberJsonResult}
+   */
+  #getCucumberResult(file) {
+    return __nccwpck_require__(6805)(resolveFilePath(file));
+  }
+
+  parse() {
+    this.#setTestResults();
+    return this.result;
+  }
+
+  #setTestResults() {
+    this.result.name = '';
+    this.#setTestSuites();
+    this.result.status = this.result.suites.every(suite => suite.status === "PASS") ? "PASS" : "FAIL";
+    this.result.total = this.result.suites.reduce((total, suite) => total + suite.total, 0);
+    this.result.passed = this.result.suites.reduce((total, suite) => total + suite.passed, 0);
+    this.result.failed = this.result.suites.reduce((total, suite) => total + suite.failed, 0);
+    this.result.duration = this.result.suites.reduce((total, suite) => total + suite.duration, 0);
+    this.result.duration = parseFloat(this.result.duration.toFixed(2));
+  }
+
+  #setTestSuites() {
+    for (const feature of this.raw_result) {
+      const test_suite = new TestSuite();
+      test_suite.name = feature.name;
+      test_suite.total = feature.elements.length;
+      for (const scenario of feature.elements) {
+        test_suite.cases.push(this.#getTestCase(scenario));
+      }
+      test_suite.total = test_suite.cases.length;
+      test_suite.passed = test_suite.cases.filter(_ => _.status === "PASS").length;
+      test_suite.failed = test_suite.cases.filter(_ => _.status === "FAIL").length;
+      test_suite.duration = test_suite.cases.reduce((total, _) => total + _.duration, 0);
+      test_suite.duration = parseFloat(test_suite.duration.toFixed(2));
+      test_suite.status = test_suite.total === test_suite.passed ? 'PASS' : 'FAIL';
+      const { tags, metadata } = this.#getTagsAndMetadata(feature);
+      test_suite.tags = tags;
+      test_suite.metadata = metadata;
+      for (const test_case of test_suite.cases) {
+        this.mergeTags(test_suite.tags, test_case.tags);
+        this.mergeMetadata(test_suite.metadata, test_case.metadata);
+      }
+
+      this.result.suites.push(test_suite);
+    }
+  }
+
+  /**
+   *
+   * @param {import('./cucumber.result').CucumberElement} scenario
+   */
+  #getTestCase(scenario) {
+    const test_case = new TestCase();
+    test_case.name = scenario.name;
+    for (const step of scenario.steps) {
+      const test_step = this.#getTestStep(step);
+      if (test_step) {
+        test_case.steps.push(test_step);
+      }
+    }
+    test_case.total = test_case.steps.length;
+    test_case.passed = test_case.steps.filter(step => step.status === "PASS").length;
+    test_case.failed = test_case.steps.filter(step => step.status === "FAIL").length;
+    test_case.skipped = test_case.steps.filter(step => step.status === "SKIP").length;
+    test_case.duration = test_case.steps.reduce((total, _) => total + _.duration, 0);
+    test_case.duration = parseFloat((test_case.duration).toFixed(2));
+    test_case.status = test_case.total === test_case.passed ? 'PASS' : 'FAIL';
+    if (test_case.status === "FAIL") {
+      const failed_step = test_case.steps.find(step => step.status === "FAIL");
+      test_case.failure = failed_step.failure;
+      test_case.stack_trace = failed_step.stack_trace
+    }
+    const { tags, metadata } = this.#getTagsAndMetadata(scenario);
+    test_case.tags = tags;
+    test_case.metadata = metadata;
+    test_case.attachments = this.#getAttachments(scenario.steps);
+    return test_case;
+  }
+
+  /**
+   *
+   * @param {import('./cucumber.result').CucumberStep} step
+   */
+  #getTestStep(step) {
+    if (!step.keyword) {
+      return;
+    }
+    const test_step = new TestStep();
+    test_step.name = step.keyword.endsWith(' ') ? step.keyword + (step.name || '') : step.keyword + ' ' + (step.name || '');
+    test_step.status = this.parseStatus(step.result.status);
+    test_step.duration = step.result.duration ? parseFloat((step.result.duration / 1000000).toFixed(2)) : 0;
+    if (test_step.status === "FAIL") {
+      const { failure, stack_trace } = this.#getFailureAndStackTrace(step.result.error_message);
+      test_step.failure = failure;
+      test_step.stack_trace = stack_trace;
+    }
+    return test_step;
+  }
+
+  /**
+   *
+   * @param {string} message
+   */
+  #getFailureAndStackTrace(message) {
+    if (message) {
+      const stack_trace_start_index = message.indexOf('    at ');
+      if (stack_trace_start_index) {
+        const failure = this.parseText(message.slice(0, stack_trace_start_index));
+        const stack_trace = message.slice(stack_trace_start_index);
+        return { failure, stack_trace };
+      } else {
+        return { failure: message, stack_trace: '' };
+      }
+    }
+    return { failure: '', stack_trace: '' };
+  }
+
+  /**
+   *
+   * @param {import('./cucumber.result').CucumberFeature | import('./cucumber.result').CucumberElement} feature
+   */
+  #getTagsAndMetadata(feature) {
+    const cucumber_tags = feature.tags || [];
+    const metadata = {};
+    const tags = [];
+    if (cucumber_tags) {
+      for (const tag of cucumber_tags) {
+        if (tag["name"].includes("=")) {
+          const [name, value] = tag["name"].substring(1).split("=");
+          metadata[name] = value;
+        } else {
+          tags.push(tag["name"]);
+        }
+      }
+    }
+    if (feature.metadata) {
+      Object.assign(metadata, feature.metadata);
+    }
+
+    return { tags, metadata };
+  }
+
+  /**
+   *
+   * @param {import('./cucumber.result').CucumberStep[]} steps
+   */
+  #getAttachments(steps) {
+    const attachments = [];
+    const failed_steps = steps.filter(_ => this.parseStatus(_.result.status) === 'FAIL' && _.embeddings && _.embeddings.length > 0);
+
+    for (const step of failed_steps) {
+      for (const embedding of step.embeddings) {
+        const attachment = this.#getAttachment(step, embedding);
+        if (attachment) {
+          attachments.push(attachment);
+        }
+      }
+    }
+    return attachments;
+  }
+
+  /**
+   *
+   * @param {import('./cucumber.result').CucumberStep} step
+   * @param {import('./cucumber.result').CucumberEmbedding} embedding
+   */
+  #getAttachment(step, embedding) {
+    try {
+      const decoded = decodeIfEncoded(embedding.data);
+      const is_file_path = isFilePath(decoded);
+      if (is_file_path) {
+        const attachment = new TestAttachment();
+        attachment.name = path.parse(decoded).base;
+        attachment.path = decoded;
+        return attachment;
+      } else {
+        const file_name = step.name.replace(/[^a-zA-Z0-9]/g, '_') + '-' + Date.now();
+        const file_path = saveAttachmentToDisk(file_name, embedding.data, embedding.mime_type);
+        if (!file_path) {
+          return null;
+        }
+        const attachment = new TestAttachment();
+        attachment.name = path.parse(file_path).base;
+        attachment.path = file_path;
+        return attachment;
+      }
+    } catch (e) {
+      return null;
+    }
+  }
+
+}
+
+function parse(file) {
+  const parser = new CucumberParser(file);
+  return parser.parse();
+}
+
+module.exports = {
+  parse
+}
+
+/***/ }),
+
+/***/ 7999:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const testng = __nccwpck_require__(4316);
+const junit = __nccwpck_require__(8899);
+const nunit = __nccwpck_require__(719);
+const mstest = __nccwpck_require__(9043);
+const xunit = __nccwpck_require__(2122);
+const mocha = __nccwpck_require__(5797);
+const cucumber = __nccwpck_require__(9991);
+const TestResult = __nccwpck_require__(2658);
+const { getMatchingFilePaths } = __nccwpck_require__(944);
+
+/**
+ * @param {import('../models/TestResult')[]} results
+ */
+function merge(results) {
+  const main_result = new TestResult();
+  for (let i = 0; i < results.length; i++) {
+    const current_result = results[i];
+    if (!main_result.name) {
+      main_result.name = current_result.name;
+    }
+    main_result.total = main_result.total + current_result.total;
+    main_result.passed = main_result.passed + current_result.passed;
+    main_result.failed = main_result.failed + current_result.failed;
+    main_result.errors = main_result.errors + current_result.errors;
+    main_result.skipped = main_result.skipped + current_result.skipped;
+    main_result.retried = main_result.retried + current_result.retried;
+    main_result.duration = main_result.duration + current_result.duration;
+    main_result.suites = main_result.suites.concat(...current_result.suites);
+  }
+  main_result.status = results.every(_result => _result.status === 'PASS') ? 'PASS' : 'FAIL';
+  return main_result;
+}
+
+function getParser(type) {
+  switch (type) {
+    case 'testng':
+      return testng;
+    case 'junit':
+      return junit;
+    case 'xunit':
+      return xunit;
+    case 'nunit':
+      return nunit;
+    case 'mstest':
+      return mstest;
+    case 'mocha':
+      return mocha;
+    case 'cucumber':
+      return cucumber;
+    default:
+      throw `UnSupported Result Type - ${type}`;
+  }
+}
+
+/**
+ * @param {import('../index').ParseOptions} options
+ */
+function parse(options) {
+  const parser = getParser(options.type);
+  const results = [];
+  for (let i = 0; i < options.files.length; i++) {
+    const matched_files = getMatchingFilePaths(options.files[i]);
+    for (let j = 0; j < matched_files.length; j++) {
+      const file = matched_files[j];
+      results.push(parser.parse(file, options));
+    }
+  }
+  return merge(results);
+}
+
+function parseV2(options) {
+  const parser = getParser(options.type);
+  const results = [];
+  const errors = [];
+  for (let i = 0; i < options.files.length; i++) {
+    const matched_files = getMatchingFilePaths(options.files[i]);
+    for (let j = 0; j < matched_files.length; j++) {
+      const file = matched_files[j];
+      try {
+        results.push(parser.parse(file, options));
+      } catch (error) {
+        errors.push(error.toString());
+        console.error(error);
+      }
+    }
+  }
+  if (results.length > 0) {
+    return { result: merge(results), errors: errors };
+  }
+  return { result: null, errors: errors };
+}
+
+module.exports = {
+  parse,
+  parseV2
+}
+
+/***/ }),
+
+/***/ 8899:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const path = __nccwpck_require__(6928);
+const { getJsonFromXMLFile } = __nccwpck_require__(944);
+
+const TestResult = __nccwpck_require__(2658);
+const TestSuite = __nccwpck_require__(9275);
+const TestCase = __nccwpck_require__(1819);
+const TestAttachment = __nccwpck_require__(9662);
+
+function getTestCase(rawCase, suite_meta) {
+  const test_case = new TestCase();
+  test_case.name = rawCase["@_name"];
+  test_case.duration = rawCase["@_time"] * 1000;
+  test_case.metadata = Object.assign({}, suite_meta);
+  setAttachments(rawCase, test_case);
+  setMetaData(rawCase, test_case);
+  if (rawCase.failure && rawCase.failure.length > 0) {
+    test_case.status = 'FAIL';
+    setErrorAndStackTrace(test_case, rawCase);
+  } else if (rawCase.skipped != undefined) {
+    test_case.status = 'SKIP';
+  } else {
+    test_case.status = 'PASS';
+  }
+  return test_case;
+}
+
+function setErrorAndStackTrace(test_case, raw_case) {
+  test_case.setFailure(raw_case.failure[0]["@_message"]);
+  // wdio junit reporter
+  if (!test_case.failure && raw_case.error && raw_case.error.length > 0) {
+    test_case.setFailure(raw_case.error[0]["@_message"]);
+  }
+  if (raw_case['system-err'] && raw_case['system-err'].length > 0) {
+    test_case.stack_trace = raw_case['system-err'][0];
+  }
+  if (!test_case.stack_trace) {
+    if (raw_case.failure[0]["#text"]) {
+      test_case.stack_trace = raw_case.failure[0]["#text"];
+    }
+  }
+}
+
+/**
+ *
+ * @param {object} rawSuite
+ * @param {import('..').ParseOptions} options
+ * @returns
+ */
+function getTestSuite(rawSuite) {
+  const suite = new TestSuite();
+  suite.name = rawSuite["@_name"];
+  suite.total = rawSuite["@_tests"];
+  suite.failed = rawSuite["@_failures"];
+  const errors = rawSuite["@_errors"];
+  if (errors) {
+    suite.errors = errors;
+  }
+  const skipped = rawSuite["@_skipped"];
+  if (skipped) {
+    suite.skipped = skipped;
+  }
+  suite.total = suite.total - suite.skipped;
+  suite.passed = suite.total - suite.failed - suite.errors;
+  suite.duration = rawSuite["@_time"] * 1000;
+  suite.status = suite.total === suite.passed ? 'PASS' : 'FAIL';
+  setMetaData(rawSuite, suite);
+  const raw_test_cases = rawSuite.testcase;
+  if (raw_test_cases) {
+    for (let i = 0; i < raw_test_cases.length; i++) {
+      suite.cases.push(getTestCase(raw_test_cases[i], suite.metadata));
+    }
+  }
+  return suite;
+}
+
+/**
+ * @param {import('./junit.result').JUnitTestSuite | import('./junit.result').JUnitTestCase} rawElement
+ * @param {TestCase | TestSuite} test_element
+ */
+function setMetaData(rawElement, test_element) {
+  if (rawElement.properties && rawElement.properties.property.length > 0) {
+    const raw_properties = rawElement.properties.property;
+    for (const raw_property of raw_properties) {
+      test_element.metadata[raw_property["@_name"]] = raw_property["@_value"];
+    }
+  }
+  // handle testsuite specific attributes
+  if (test_element instanceof TestSuite) {
+    if (rawElement["@_hostname"]) {
+      test_element.metadata["hostname"] = rawElement["@_hostname"];
+    }
+  }
+}
+
+/**
+ * @param {import('./junit.result').JUnitTestCase} rawCase
+ * @param {TestCase} test_element
+ */
+function setAttachments(rawCase, test_element) {
+  if (rawCase['system.out'] || rawCase['system-out']) {
+    const systemOut = rawCase['system.out'] || rawCase['system-out'];
+
+    // junit attachments plug syntax is [[ATTACHMENT|/absolute/path/to/file.png]]
+    const regex = new RegExp('\\[\\[ATTACHMENT\\|([^\\]]+)\\]\\]', 'g');
+
+    while ((m = regex.exec(systemOut)) !== null) {
+      // avoid infinite loops with zero-width matches
+      if (m.index === regex.lastIndex) {
+        regex.lastIndex++;
+      }
+
+      let filePath = m[1].trim();
+
+      if (filePath.length > 0) {
+        const attachment = new TestAttachment();
+        attachment.path = filePath;
+        attachment.name = path.parse(filePath).base;
+        test_element.attachments.push(attachment);
+      }
+    }
+  }
+}
+
+/**
+ * @param {TestResult} result
+ */
+function setAggregateResults(result) {
+  if (Number.isNaN(result.passed) || Number.isNaN(result.failed)) {
+    let total = 0;
+    let passed = 0;
+    let failed = 0;
+    let errors = 0;
+    let skipped = 0;
+    result.suites.forEach(_suite => {
+      total = _suite.total + total;
+      passed = _suite.passed + passed;
+      failed = _suite.failed + failed;
+      errors = _suite.errors + errors;
+      skipped = _suite.skipped + skipped;
+    });
+    result.passed = passed;
+    result.failed = failed;
+    result.errors = errors;
+    result.skipped = skipped;
+    result.total = total;
+  }
+  if (Number.isNaN(result.duration)) {
+    let duration = 0;
+    result.suites.forEach(_suite => {
+      duration = _suite.duration + duration;
+    });
+    result.duration = duration;
+  }
+}
+
+/**
+ *
+ * @param {import('./junit.result').JUnitResultJson} json
+ * @param {import('..').ParseOptions} options
+ * @returns
+ */
+function getTestResult(json, options) {
+  const result = new TestResult();
+  const rawResult = json["testsuites"] ? json["testsuites"][0] : json["testsuite"];
+  result.name = rawResult["@_name"] || '';
+  result.total = rawResult["@_tests"];
+  result.failed = rawResult["@_failures"];
+  const errors = rawResult["@_errors"];
+  if (errors) {
+    result.errors = errors;
+  }
+  const skipped = rawResult["@_skipped"];
+  if (skipped) {
+    result.skipped = skipped;
+  }
+  result.total = result.total - result.skipped;
+  result.passed = result.total - result.failed - result.errors;
+  result.duration = rawResult["@_time"] * 1000;
+  // top-level element is testsuites
+  if (json["testsuites"]) {
+    const rawSuites = rawResult["testsuite"];
+    // Don't filter if there are no testsuite objects
+    if (!(typeof rawSuites === "undefined")) {
+      const filteredSuites = rawSuites.filter(suite => suite.testcase);
+      for (let i = 0; i < filteredSuites.length; i++) {
+        result.suites.push(getTestSuite(filteredSuites[i], options));
+      }
+    }
+  } else {
+    // top level element is testsuite
+    result.suites.push(getTestSuite(rawResult, options));
+  }
+
+  setAggregateResults(result);
+  result.status = result.total === result.passed ? 'PASS' : 'FAIL';
+  return result;
+}
+
+/**
+ *
+ * @param {string} file
+ * @param {import('..').ParseOptions} options
+ * @returns
+ */
+function parse(file, options) {
+  const json = getJsonFromXMLFile(file);
+  return getTestResult(json, options);
+}
+
+module.exports = {
+  parse
+}
+
+
+/***/ }),
+
+/***/ 5797:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+/*
+*  Parser for both Mocha Json report and Mochawesome json
+*/
+const { resolveFilePath } = __nccwpck_require__(944);
+
+const TestResult = __nccwpck_require__(2658);
+const TestSuite = __nccwpck_require__(9275);
+const TestCase = __nccwpck_require__(1819);
+
+function getTestCase(rawCase) {
+  const test_case = new TestCase();
+  test_case.name = rawCase["title"];
+  test_case.duration = rawCase["duration"];
+  setMetaData(test_case);
+  if (rawCase["state"] == "pending") {
+    test_case.status = 'SKIP';
+  }
+  else if (rawCase.state && rawCase.state === "failed") {
+    test_case.status = 'FAIL';
+    test_case.setFailure(rawCase.err["message"]);
+  }
+  else {
+    test_case.status = 'PASS';
+  }
+  return test_case;
+}
+
+function getTestSuite(rawSuite) {
+  flattenTestSuite(rawSuite);
+  const suite = new TestSuite();
+  suite.name = rawSuite["title"];
+  suite.total = rawSuite["tests"].length;
+  suite.passed = rawSuite["passes"].length;
+  suite.failed = rawSuite["failures"].length;
+  suite.duration = rawSuite["duration"];
+  suite.skipped = rawSuite["pending"].length;
+  suite.status = suite.total === (suite.passed + suite.skipped) ? 'PASS' : 'FAIL';
+  setMetaData(suite);
+  const raw_test_cases = rawSuite.tests;
+  if (raw_test_cases) {
+    for (let i = 0; i < raw_test_cases.length; i++) {
+      suite.cases.push(getTestCase(raw_test_cases[i]));
+    }
+  }
+  return suite;
+}
+
+/**
+ * Function to format the mocha raw json report
+ * @param {import("./mocha.result").MochaJsonData} raw_json
+ */
+function getTestResult(raw_json) {
+  const result = new TestResult();
+  const { stats, results } = formatMochaJsonReport(raw_json);
+
+  /** @type {import('./mocha.result').MochaResult} */
+  const formattedResult = results[0] || {};
+  const suites = formattedResult["suites"] || [];
+
+  result.name = formattedResult["title"] || "";
+  result.total = stats["tests"];
+  result.passed = stats["passes"];
+  result.failed = stats["failures"];
+  const errors = formattedResult["errors"];
+  if (errors) {
+    result.errors = errors;
+  }
+  const skipped = stats["pending"];
+  if (skipped) {
+    result.skipped = skipped;
+  }
+  result.duration = stats["duration"] || 0;
+
+  if (suites.length > 0) {
+    for (let i = 0; i < suites.length; i++) {
+      result.suites.push(getTestSuite(suites[i]));
+    }
+  }
+  result.status = (result.total - result.skipped) === result.passed ? 'PASS' : 'FAIL';
+  return result;
+}
+
+/**
+ * Function to format the mocha raw json report
+ * @param {import("./mocha.result").MochaJsonData} raw_json
+ * @returns formatted json object
+ */
+function formatMochaJsonReport(raw_json) {
+  if (raw_json.hasOwnProperty('meta')) {
+    return raw_json
+  }
+  const formattedJson = { stats: raw_json.stats, results: [] };
+  const suites = [];
+  raw_json.failures.forEach(test => test.state = "failed");
+  raw_json.passes.forEach(test => test.state = "passed");
+  raw_json.pending.forEach(test => {
+    test.state = "pending";
+    test.duration = 0;
+  });
+  if (raw_json.hasOwnProperty('skipped')) {
+    raw_json.skipped.forEach(test => {
+      test.state = "pending";
+      test.duration = 0;
+    });
+    raw_json.pending.concat(raw_json.skipped);
+  }
+
+  const rawTests = [...raw_json.passes, ...raw_json.failures, ...raw_json.pending];
+  const testSuites = [...new Set(rawTests.map(test => test.fullTitle.split(' ' + test.title)[0]))];
+
+  for (const testSuite of testSuites) {
+    const suite = {
+      title: testSuite,
+      tests: rawTests.filter(test => test.fullTitle.startsWith(testSuite))
+    }
+    suite.passes = suite.tests.filter(test => test.state === "passed");
+    suite.failures = suite.tests.filter(test => test.state === "failed");
+    suite.pending = suite.tests.filter(test => test.state === "pending");
+    suite.duration = suite.tests.map(test => test.duration).reduce((total, currVal) => total + currVal, 0);
+    suite.fullFile = suite.tests[0].file || "";
+    suites.push(suite);
+  }
+  formattedJson.results.push({ suites: suites });
+  return formattedJson;
+}
+
+/**
+ *
+ * @param {import("./mocha.result").MochaSuite} suite
+ */
+function flattenTestSuite(suite) {
+  if (!suite.suites) {
+    return;
+  }
+  for (const child_suite of suite.suites) {
+    flattenTestSuite(child_suite);
+    suite.tests = suite.tests.concat(child_suite.tests);
+    suite.passes = suite.passes.concat(child_suite.passes);
+    suite.failures = suite.failures.concat(child_suite.failures);
+    suite.pending = suite.pending.concat(child_suite.pending);
+    suite.skipped = suite.skipped.concat(child_suite.skipped);
+    suite.duration += child_suite.duration;
+  }
+}
+
+/**
+ *
+ * @param {TestCase | TestSuite} test_element
+ */
+function setMetaData(test_element) {
+  const regexp = /([\@\#][^\s]*)/gm; // match @tag or #tag
+  const matches = [...test_element.name.matchAll(regexp)];
+  if (matches.length > 0) {
+    for (const match of matches) {
+      const rawTag = match[0];
+      if (rawTag.includes("=")) {
+        const [name, value] = rawTag.substring(1).split("=");
+        test_element.metadata[name] = value;
+      } else {
+        test_element.tags.push(rawTag);
+      }
+    }
+  }
+}
+
+
+function parse(file) {
+  const json = require(resolveFilePath(file));
+  return getTestResult(json);
+}
+
+module.exports = {
+  parse
+}
+
+
+/***/ }),
+
+/***/ 9043:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getJsonFromXMLFile } = __nccwpck_require__(944);
+const path = __nccwpck_require__(6928);
+
+const TestResult = __nccwpck_require__(2658);
+const TestSuite = __nccwpck_require__(9275);
+const TestCase = __nccwpck_require__(1819);
+const TestAttachment = __nccwpck_require__(9662);
+
+const RESULT_MAP = {
+  Passed: "PASS",
+  Failed: "FAIL",
+  NotExecuted: "SKIP",
+}
+
+/**
+ *
+ * @param {*} rawElement
+ * @param {TestCase | TestSuite} test_element
+ */
+function populateMetaData(rawElement, test_element) {
+  if (rawElement.TestCategory && rawElement.TestCategory.TestCategoryItem) {
+    let rawCategories = rawElement.TestCategory.TestCategoryItem;
+    for (let i = 0; i < rawCategories.length; i++) {
+      let categoryName = rawCategories[i]["@_TestCategory"];
+      test_element.tags.push(categoryName);
+
+      // create comma-delimited list of categories
+      if (test_element.metadata["Categories"]) {
+        test_element.metadata["Categories"] = test_element.metadata["Categories"].concat(",", categoryName)
+      } else {
+        test_element.metadata["Categories"] = categoryName;
+      }
+    }
+  }
+
+  // as per https://github.com/microsoft/vstest/issues/2480:
+  // - properties are supported by the XSD but are not included in TRX Visual Studio output
+  // - including support for properties because third-party extensions might generate this data
+  if (rawElement.Properties) {
+    let rawProperties = rawElement.Properties.Property;
+    for (let i = 0; i < rawProperties.length; i++) {
+      let key = rawProperties[i].Key ?? "not-set";
+      let val = rawProperties[i].Value ?? "";
+      map[key] = val;
+    }
+  }
+}
+
+function populateAttachments(rawResultElement, attachments, testRunName) {
+
+  // attachments are in /TestRun/Results/UnitTestResult/ResultFiles/ResultFile[@path]
+  if (rawResultElement.ResultFiles && rawResultElement.ResultFiles.ResultFile) {
+    let executionId = rawResultElement["@_executionId"];
+    let rawAttachments = rawResultElement.ResultFiles.ResultFile;
+    for (let i = 0; i < rawAttachments.length; i++) {
+      let filePath = rawAttachments[i]["@_path"];
+      if (filePath) {
+
+        // file path is relative to testresults.trx
+        // stored in ./<testrunname>/in/<executionId>/path
+
+        let attachment = new TestAttachment();
+        attachment.path = path.join(testRunName, "In", executionId, ...(filePath.split(/[\\/]/g)));
+        attachments.push(attachment);
+      }
+    }
+  }
+}
+
+function getTestResultDuration(rawTestResult) {
+  // durations are represented in a timeformat with 7 digit microsecond precision
+  // TODO: introduce d3-time-format after https://github.com/test-results-reporter/parser/issues/42 is fixed.
+  return 0;
+}
+
+function getTestCaseName(rawDefinition) {
+  if (rawDefinition.TestMethod) {
+    let className = rawDefinition.TestMethod["@_className"];
+    let name = rawDefinition.TestMethod["@_name"];
+
+    // attempt to produce fully-qualified name
+    if (className) {
+      className = className.split(",")[0]; // handle strong-name scenario (typeName, assembly, culture, version)
+      return className.concat(".", name);
+    } else {
+      return name;
+    }
+  } else {
+    throw new Error("Unrecognized TestDefinition");
+  }
+}
+
+function getTestSuiteName(testCase) {
+  // assume testCase.name is full-qualified namespace.classname.methodname
+  let index = testCase.name.lastIndexOf(".");
+  return testCase.name.substring(0, index);
+}
+
+function getTestRunName(rawTestRun) {
+  // testrun.name contains '@', spaces and ':'
+  let name = rawTestRun["@_name"];
+  if (name) {
+    return name.replace(/[ @:]/g, '_');
+  }
+  return '';
+}
+
+function getTestCase(rawTestResult, definitionMap, testRunName) {
+  let id = rawTestResult["@_testId"];
+
+  if (definitionMap.has(id)) {
+    var rawDefinition = definitionMap.get(id);
+
+    var testCase = new TestCase();
+    testCase.id = id;
+    testCase.name = getTestCaseName(rawDefinition);
+    testCase.status = RESULT_MAP[rawTestResult["@_outcome"]];
+    testCase.duration = getTestResultDuration(rawTestResult);
+
+    // collect error messages
+    if (rawTestResult.Output && rawTestResult.Output.ErrorInfo) {
+      testCase.setFailure(rawTestResult.Output.ErrorInfo.Message);
+      testCase.stack_trace = rawTestResult.Output.ErrorInfo.StackTrace ?? '';
+    }
+    // populate attachments
+    populateAttachments(rawTestResult, testCase.attachments, testRunName);
+    // populate meta
+    populateMetaData(rawDefinition, testCase);
+
+    return testCase;
+  } else {
+    throw new Error(`Unrecognized testId ${id ?? ''}`);
+  }
+}
+
+function getTestDefinitionsMap(rawTestDefinitions) {
+  let map = new Map();
+
+  // assume all definitions are 'UnitTest' elements
+  if (rawTestDefinitions.UnitTest) {
+    let rawUnitTests = rawTestDefinitions.UnitTest;
+    for (let i = 0; i < rawUnitTests.length; i++) {
+      let rawUnitTest = rawUnitTests[i];
+      let id = rawUnitTest["@_id"];
+      if (id) {
+        map.set(id, rawUnitTest);
+      }
+    }
+  }
+
+  return map;
+}
+
+function getTestResults(rawTestResults) {
+  let results = [];
+
+  // assume all results are UnitTestResult elements
+  if (rawTestResults.UnitTestResult) {
+    let unitTests = rawTestResults.UnitTestResult;
+    for (let i = 0; i < unitTests.length; i++) {
+      results.push(unitTests[i]);
+    }
+  }
+  return results;
+}
+
+function getTestSuites(rawTestRun) {
+
+  // test attachments are stored in a testrun specific folder <name>/in/<executionid>/<computername>
+  const testRunName = getTestRunName(rawTestRun);
+  // outcomes + durations are stored in /TestRun/TestResults/*
+  const testResults = getTestResults(rawTestRun.Results);
+  // test names and details are stored in /TestRun/TestDefinitions/*
+  const testDefinitions = getTestDefinitionsMap(rawTestRun.TestDefinitions);
+
+  // trx does not include suites, so we'll reverse engineer them by
+  // grouping results from the same className
+  let suiteMap = new Map();
+
+  for (let i = 0; i < testResults.length; i++) {
+    let rawTestResult = testResults[i];
+    let testCase = getTestCase(rawTestResult, testDefinitions, testRunName);
+    let suiteName = getTestSuiteName(testCase);
+
+    if (!suiteMap.has(suiteName)) {
+      let suite = new TestSuite();
+      suite.name = suiteName;
+      suiteMap.set(suiteName, suite);
+    }
+    suiteMap.get(suiteName).cases.push(testCase);
+  }
+
+  var result = [];
+  for (let suite of suiteMap.values()) {
+    suite.total = suite.cases.length;
+    suite.passed = suite.cases.filter(i => i.status == "PASS").length;
+    suite.failed = suite.cases.filter(i => i.status == "FAIL").length;
+    suite.skipped = suite.cases.filter(i => i.status == "SKIP").length;
+    suite.errors = suite.cases.filter(i => i.status == "ERROR").length;
+    suite.duration = suite.cases.reduce((total, test) => { return total + test.duration }, 0);
+    suite.status = (suite.failed + suite.errors) > 0 ? "FAIL" : "PASS";
+    result.push(suite);
+  }
+
+  return result;
+}
+
+function getTestResult(json) {
+  const rawTestRun = json.TestRun;
+
+  let result = new TestResult();
+  result.id = rawTestRun["@_id"];
+  result.suites.push(...getTestSuites(rawTestRun));
+
+  // calculate totals
+  result.total = result.suites.reduce((total, suite) => { return total + suite.total }, 0);
+  result.passed = result.suites.reduce((total, suite) => { return total + suite.passed }, 0);
+  result.failed = result.suites.reduce((total, suite) => { return total + suite.failed }, 0);
+  result.skipped = result.suites.reduce((total, suite) => { return total + suite.skipped }, 0);
+  result.errors = result.suites.reduce((total, suite) => { return total + suite.errors }, 0);
+  result.duration = result.suites.reduce((total, suite) => { return total + suite.duration }, 0);
+
+  result.status = (result.failed + result.errors) > 0 ? "FAIL" : "PASS";
+
+  return result;
+}
+
+function parse(file) {
+  const json = getJsonFromXMLFile(file);
+  return getTestResult(json);
+}
+
+module.exports = {
+  parse
+}
+
+/***/ }),
+
+/***/ 719:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getJsonFromXMLFile } = __nccwpck_require__(944);
+
+const TestResult = __nccwpck_require__(2658);
+const TestSuite = __nccwpck_require__(9275);
+const TestCase = __nccwpck_require__(1819);
+const TestAttachment = __nccwpck_require__(9662);
+
+const SUITE_TYPES_WITH_TEST_CASES = [
+  "TestFixture",
+  "ParameterizedTest",
+  "GenericFixture",
+  "ParameterizedMethod"   // v3
+]
+
+const RESULT_MAP = {
+  Success: "PASS",        // v2
+  Failure: "FAIL",        // v2
+  Ignored: "SKIP",        // v2
+  NotRunnable: "SKIP",    // v2
+  Error: "ERROR",         // v2
+  Inconclusive: "FAIL",   // v2
+
+  Passed: "PASS",         // v3
+  Failed: "FAIL",         // v3
+  Skipped: "SKIP",        // v3
+}
+
+function populateAttachments(rawCase, attachments) {
+  if (rawCase.attachments && rawCase.attachments.attachment) {
+    let rawAttachments = rawCase.attachments.attachment;
+    for (var i = 0; i < rawAttachments.length; i++) {
+      var attachment = new TestAttachment();
+      attachment.path = rawAttachments[i].filePath;
+      if (rawAttachments[i].description) {
+        attachment.name = rawAttachments[i].description;
+      }
+      attachments.push(attachment);
+    }
+  }
+}
+
+function mergeMeta(map1, map2) {
+  for (let kvp of Object.entries(map1)) {
+    map2[kvp[0]] = kvp[1];
+  }
+}
+
+/**
+ *
+ * @param {*} raw
+ * @param {TestCase | TestSuite} test_element
+ */
+function populateMetaData(raw, test_element) {
+
+  // v2 supports categories
+  if (raw.categories) {
+    let categories = raw.categories.category;
+    for (let i = 0; i < categories.length; i++) {
+      let categoryName = categories[i]["@_name"];
+      test_element.tags.push(categoryName);
+
+      // create comma-delimited list of categories
+      if (test_element.metadata["Categories"]) {
+        test_element.metadata["Categories"] = test_element.metadata["Categories"].concat(",", categoryName);
+      } else {
+        test_element.metadata["Categories"] = categoryName;
+      }
+    }
+  }
+
+  // v2/v3 support properties
+  if (raw.properties) {
+    let properties = raw.properties.property;
+    for (let i = 0; i < properties.length; i++) {
+      let property = properties[i];
+      let propName = property["@_name"];
+      let propValue = property["@_value"];
+
+      // v3 treats 'Categories' as property "Category"
+      if (propName == "Category") {
+
+        if (test_element.metadata["Categories"]) {
+          test_element.metadata["Categories"] = test_element.metadata["Categories"].concat(",", propValue);
+        } else {
+          test_element.metadata["Categories"] = propValue;
+        }
+
+      } else {
+        test_element.metadata[propName] = propValue;
+      }
+    }
+  }
+}
+
+function getNestedTestCases(rawSuite) {
+  if (rawSuite.results) {
+    return rawSuite.results["test-case"];
+  } else {
+    return rawSuite["test-case"];
+  }
+}
+
+function hasNestedSuite(rawSuite) {
+  return getNestedSuite(rawSuite) !== null;
+}
+
+function getNestedSuite(rawSuite) {
+  // nunit v2 nests test-suite inside 'results'
+  if (rawSuite.results && rawSuite.results["test-suite"]) {
+    return rawSuite.results["test-suite"];
+  } else {
+    // nunit v3 nests test-suites as immediate children
+    if (rawSuite["test-suite"]) {
+      return rawSuite["test-suite"];
+    }
+    else {
+      // not nested
+      return null;
+    }
+  }
+}
+
+function getTestCases(rawSuite, parent_meta) {
+  const cases = [];
+
+  let rawTestCases = getNestedTestCases(rawSuite);
+  if (rawTestCases) {
+    for (let i = 0; i < rawTestCases.length; i++) {
+      let rawCase = rawTestCases[i];
+      let testCase = new TestCase();
+      let result = rawCase["@_result"]
+      testCase.id = rawCase["@_id"] ?? "";
+      testCase.name = rawCase["@_fullname"] ?? rawCase["@_name"];
+      testCase.duration = (rawCase["@_time"] ?? rawCase["@_duration"]) * 1000; // in milliseconds
+      testCase.status = RESULT_MAP[result];
+
+      // v2 : non-executed should be tests should be Ignored
+      if (rawCase["@_executed"] == "False") {
+        testCase.status = "SKIP"; // exclude failures that weren't executed.
+      }
+      // v3 : failed tests with error label should be Error
+      if (rawCase["@_label"] == "Error") {
+        testCase.status = "ERROR";
+      }
+      let errorDetails = rawCase.reason ?? rawCase.failure;
+      if (errorDetails !== undefined) {
+        testCase.setFailure(errorDetails.message);
+        if (errorDetails["stack-trace"]) {
+          testCase.stack_trace = errorDetails["stack-trace"]
+        }
+      }
+      // populate attachments
+      populateAttachments(rawCase, testCase.attachments);
+      // copy parent_meta data to test case
+      mergeMeta(parent_meta, testCase.metadata);
+      populateMetaData(rawCase, testCase);
+
+      cases.push(testCase);
+    }
+  }
+
+  return cases;
+}
+
+function getTestSuites(rawSuites, assembly_meta) {
+  const suites = [];
+
+  for (let i = 0; i < rawSuites.length; i++) {
+    let rawSuite = rawSuites[i];
+
+    if (rawSuite["@_type"] == "Assembly") {
+      assembly_meta = {};
+      populateMetaData(rawSuite, { tags: [], metadata: assembly_meta });
+    }
+
+    if (hasNestedSuite(rawSuite)) {
+      // handle nested test-suites
+      suites.push(...getTestSuites(getNestedSuite(rawSuite), assembly_meta));
+    } else if (SUITE_TYPES_WITH_TEST_CASES.indexOf(rawSuite["@_type"]) !== -1) {
+
+      let suite = new TestSuite();
+      suite.id = rawSuite["@_id"] ?? '';
+      suite.name = rawSuite["@_fullname"] ?? rawSuite["@_name"];
+      suite.duration = (rawSuite["@_time"] ?? rawSuite["@_duration"]) * 1000; // in milliseconds
+      suite.status = RESULT_MAP[rawSuite["@_result"]];
+
+      mergeMeta(assembly_meta, suite.metadata);
+      populateMetaData(rawSuite, suite);
+      suite.cases.push(...getTestCases(rawSuite, suite.metadata));
+
+      // calculate totals
+      suite.total = suite.cases.length;
+      suite.passed = suite.cases.filter(i => i.status == "PASS").length;
+      suite.failed = suite.cases.filter(i => i.status == "FAIL").length;
+      suite.errors = suite.cases.filter(i => i.status == "ERROR").length;
+      suite.skipped = suite.cases.filter(i => i.status == "SKIP").length;
+
+      suites.push(suite);
+    }
+  }
+
+  return suites;
+}
+
+function getTestResult(json) {
+  const nunitVersion = (json["test-results"] !== undefined) ? "v2" :
+    (json["test-run"] !== undefined) ? "v3" : null;
+
+  if (nunitVersion == null) {
+    throw new Error("Unrecognized xml format");
+  }
+
+  const result = new TestResult();
+  const rawResult = json["test-results"] ?? json["test-run"];
+  const rawSuite = rawResult["test-suite"][0];
+
+  result.name = rawResult["@_fullname"] ?? rawResult["@_name"];
+  result.duration = (rawSuite["@_time"] ?? rawSuite["@_duration"]) * 1000; // in milliseconds
+  result.status = RESULT_MAP[rawSuite["@_result"]];
+
+  result.suites.push(...getTestSuites([rawSuite], null));
+
+  result.total = result.suites.reduce((total, suite) => { return total + suite.cases.length }, 0);
+  result.passed = result.suites.reduce((total, suite) => { return total + suite.passed }, 0);
+  result.failed = result.suites.reduce((total, suite) => { return total + suite.failed }, 0);
+  result.skipped = result.suites.reduce((total, suite) => { return total + suite.skipped }, 0);
+  result.errors = result.suites.reduce((total, suite) => { return total + suite.errors }, 0);
+
+  return result;
+}
+
+function parse(file) {
+  const json = getJsonFromXMLFile(file);
+  return getTestResult(json);
+}
+
+module.exports = {
+  parse
+}
+
+/***/ }),
+
+/***/ 4316:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getJsonFromXMLFile } = __nccwpck_require__(944);
+
+const TestResult = __nccwpck_require__(2658);
+const TestSuite = __nccwpck_require__(9275);
+const TestCase = __nccwpck_require__(1819);
+
+// assemble a fully qualified test name (class.name)
+function getFullTestName(raw) {
+  return "".concat(raw["@_class"], ".", raw["@_name"]);
+}
+
+// create a mapping between fully qualified test name and and group
+function getSuiteGroups(rawSuite) {
+  let testCaseToGroupMap = new Map();
+
+  if (rawSuite.groups && rawSuite.groups.group.length > 0) {
+    let raw_groups = rawSuite.groups.group;
+    for (let i = 0; i < raw_groups.length; i++) {
+      let group_methods = raw_groups[i].method;
+      let groupName = raw_groups[i]["@_name"];
+      for (let j = 0; j < group_methods.length; j++) {
+        let method = group_methods[j];
+        let key = getFullTestName(method);
+        if (!testCaseToGroupMap.has(key)) {
+          testCaseToGroupMap.set(key, []);
+        }
+        testCaseToGroupMap.get(key).push(groupName);
+      }
+    }
+  }
+  return testCaseToGroupMap;
+}
+
+function getTestCase(rawCase, testCaseToGroupMap) {
+  const test_case = new TestCase();
+  test_case.name = rawCase["@_name"];
+  test_case.duration = rawCase["@_duration-ms"];
+  test_case.status = rawCase["@_status"];
+  const key = getFullTestName(rawCase);
+  if (testCaseToGroupMap.has(key)) {
+    let groups = testCaseToGroupMap.get(key);
+    test_case.tags = groups;
+  }
+  if (rawCase.exception) {
+    test_case.setFailure(rawCase.exception[0].message);
+  }
+  if (rawCase['@_retried'] === true) {
+    test_case.status = 'RETRY';
+  }
+  return test_case;
+}
+
+function getTestSuiteFromTest(rawTest, testCaseToGroupMap) {
+  const suite = new TestSuite();
+  suite.name = rawTest['@_name'];
+  suite.duration = rawTest['@_duration-ms'];
+  const rawTestMethods = [];
+  const rawClasses = rawTest.class;
+  for (let i = 0; i < rawClasses.length; i++) {
+    let testMethods = rawClasses[i]['test-method'].filter(raw => !raw['@_is-config']);
+    testMethods.forEach(testMethod => {
+      testMethod["@_class"] = rawClasses[i]["@_name"]; // push className onto test-method
+    });
+    rawTestMethods.push(...testMethods);
+  }
+  suite.total = rawTestMethods.length;
+  suite.passed = rawTestMethods.filter(test => test['@_status'] === 'PASS').length;
+  suite.failed = rawTestMethods.filter(test => test['@_status'] === 'FAIL').length;
+  suite.skipped = rawTestMethods.filter(test => test['@_status'] === 'SKIP').length;
+  const retried = rawTestMethods.filter(test => test['@_retried'] === true).length;
+  if (retried) {
+    suite.total = suite.total - retried;
+    suite.skipped = suite.skipped - retried;
+  }
+  suite.status = suite.total === suite.passed ? 'PASS' : 'FAIL';
+  for (let i = 0; i < rawTestMethods.length; i++) {
+    suite.cases.push(getTestCase(rawTestMethods[i], testCaseToGroupMap));
+  }
+  return suite;
+}
+
+function getTestSuite(rawSuite) {
+  const suite = new TestSuite();
+  suite.name = rawSuite['@_name'];
+  suite.duration = rawSuite['@_duration-ms'];
+  const rawTests = rawSuite.test;
+  const rawTestMethods = [];
+  const testCaseToGroupMap = getSuiteGroups(rawSuite);
+  for (let i = 0; i < rawTests.length; i++) {
+    const rawTest = rawTests[i];
+    const rawClasses = rawTest.class;
+    for (let j = 0; j < rawClasses.length; j++) {
+      let testMethods = rawClasses[j]['test-method'].filter(raw => !raw['@_is-config']);
+      testMethods.forEach(testMethod => {
+        testMethod["@_class"] = rawClasses[j]["@_name"]; // push className onto test-method
+      });
+      rawTestMethods.push(...testMethods);
+    }
+  }
+  suite.total = rawTestMethods.length;
+  suite.passed = rawTestMethods.filter(test => test['@_status'] === 'PASS').length;
+  suite.failed = rawTestMethods.filter(test => test['@_status'] === 'FAIL').length;
+  suite.skipped = rawTestMethods.filter(test => test['@_status'] === 'SKIP').length;
+  const retried = rawTestMethods.filter(test => test['@_retried'] === true).length;
+  if (retried) {
+    suite.total = suite.total - retried;
+    suite.skipped = suite.skipped - retried;
+  }
+  suite.status = suite.total === suite.passed ? 'PASS' : 'FAIL';
+  for (let i = 0; i < rawTestMethods.length; i++) {
+    suite.cases.push(getTestCase(rawTestMethods[i], testCaseToGroupMap));
+  }
+  return suite;
+}
+
+function parse(file) {
+  // TODO - loop through files
+  const json = getJsonFromXMLFile(file);
+  const result = new TestResult();
+  const results = json['testng-results'][0];
+  result.failed = results['@_failed'];
+  result.passed = results['@_passed'];
+  result.total = results['@_total'];
+  if (results['@_retried']) {
+    result.retried = results['@_retried'];
+    result.total = result.total - result.retried;
+  }
+  if (results['@_skipped']) {
+    result.skipped = results['@_skipped'];
+    // result.total = result.total - result.skipped;
+  }
+  const ignored = results['@_ignored'];
+  if (ignored) {
+    result.total = result.total - ignored;
+  }
+
+  const suites = results.suite;
+  const suitesWithTests = suites.filter(suite => suite.test && suite['@_duration-ms'] > 0);
+
+  if (suitesWithTests.length > 1) {
+    for (let i = 0; i < suitesWithTests.length; i++) {
+      const _suite = getTestSuite(suitesWithTests[i]);
+      result.suites.push(_suite);
+      result.duration += _suite.duration;
+      if (!result.name) {
+        result.name = _suite.name;
+      }
+    }
+  } else if (suitesWithTests.length === 1) {
+    const suite = suitesWithTests[0];
+    const testCaseToGroupMap = getSuiteGroups(suite);
+    result.name = suite['@_name'];
+    result.duration = suite['@_duration-ms'];
+    const rawTests = suite.test;
+    const rawTestsWithClasses = rawTests.filter(_rawTest => _rawTest.class);
+    for (let i = 0; i < rawTestsWithClasses.length; i++) {
+      result.suites.push(getTestSuiteFromTest(rawTestsWithClasses[i], testCaseToGroupMap));
+    }
+  } else if (suitesWithTests.length === 0){
+    const suite = suites[0];
+    result.name = suite['@_name'];
+    result.duration = suite['@_duration-ms'];
+    console.warn("No suites with tests found");
+  }
+  result.status = result.total === result.passed ? 'PASS' : 'FAIL';
+  return result;
+}
+
+
+module.exports = {
+  parse
+}
+
+
+/***/ }),
+
+/***/ 2122:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getJsonFromXMLFile } = __nccwpck_require__(944);
+
+const TestResult = __nccwpck_require__(2658);
+const TestSuite = __nccwpck_require__(9275);
+const TestCase = __nccwpck_require__(1819);
+
+function getTestCase(rawCase) {
+  const test_case = new TestCase();
+  test_case.name = rawCase["@_name"];
+  test_case.duration = rawCase["@_time"] * 1000;
+  if(rawCase["@_result"] == "Skip")
+  {
+    test_case.status = 'SKIP';
+  }
+  else if (rawCase.failure && rawCase.failure.length > 0) {
+    test_case.status = 'FAIL';
+    test_case.setFailure(rawCase.failure[0]["message"]);
+  }
+  else {
+    test_case.status = 'PASS';
+  }
+  if(rawCase.traits && rawCase.traits.trait && rawCase.traits.trait.length > 0) {
+    const traits = rawCase.traits.trait;
+    for(let i = 0; i < traits.length; i++) {
+      test_case.metadata[traits[i]["@_name"]] =  traits[i]["@_value"];
+    }
+  }
+
+  return test_case;
+}
+
+function getTestSuite(rawSuite) {
+  const suite = new TestSuite();
+  suite.name = rawSuite["@_name"];
+  suite.total = rawSuite["@_total"];
+  suite.failed = rawSuite["@_failed"];
+  suite.passed = rawSuite["@_passed"];
+  suite.duration = rawSuite["@_time"]  * 1000;
+  suite.skipped = rawSuite["@_skipped"];
+  suite.status = suite.total === suite.passed ? 'PASS' : 'FAIL';
+  suite.status = suite.skipped == suite.total ? 'PASS' : suite.status;
+  const raw_test_cases = rawSuite.test;
+  if (raw_test_cases) {
+    for(let i = 0; i < raw_test_cases.length; i++) {
+      suite.cases.push(getTestCase(raw_test_cases[i]));
+    }
+  }
+  return suite;
+}
+
+function getTestResult(json) {
+  const result = new TestResult();
+  const rawResult = json["assemblies"][0]["assembly"][0];
+
+  result.name = rawResult["@_name"];
+  result.total = rawResult["@_total"];
+  result.passed = rawResult["@_passed"];
+  result.failed = rawResult["@_failed"];
+  const errors = rawResult["@_errors"];
+  if (errors) {
+    result.errors = errors;
+  }
+  const skipped = rawResult["@_skipped"];
+  if (skipped) {
+    result.skipped = skipped;
+  }
+  result.duration = rawResult["@_time"] * 1000;
+  const rawSuites = rawResult["collection"];
+
+
+  for (let i = 0; i < rawSuites.length; i++) {
+    result.suites.push(getTestSuite(rawSuites[i]));
+  }
+  result.status = (result.total - result.skipped) === result.passed ? 'PASS' : 'FAIL';
+  return result;
+}
+
+function parse(file) {
+  const json = getJsonFromXMLFile(file);
+  return getTestResult(json);
+}
+
+module.exports = {
+  parse
+}
+
+/***/ }),
+
+/***/ 4285:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const request = __nccwpck_require__(4873);
+
+class BeatsApi {
+
+  /**
+   * @param {import('../index').PublishReport} config
+   */
+  constructor(config) {
+    this.config = config;
+  }
+
+  postTestRun(payload) {
+    return request.post({
+      url: `${this.getBaseUrl()}/api/core/v1/test-runs`,
+      headers: {
+        'x-api-key': this.config.api_key
+      },
+      body: payload
+    });
+  }
+
+ /**
+  * @param {string} run_id
+  * @returns
+  */
+  getTestRun(run_id) {
+    return request.get({
+      url: `${this.getBaseUrl()}/api/core/v1/test-runs/${run_id}`,
+      headers: {
+        'x-api-key': this.config.api_key
+      }
+    });
+  }
+
+  uploadAttachments(headers, payload) {
+    return request.post({
+      url: `${this.getBaseUrl()}/api/core/v1/test-cases/attachments`,
+      headers: {
+        'x-api-key': this.config.api_key,
+        ...headers
+      },
+      body: payload
+    });
+  }
+
+  getBaseUrl() {
+    return process.env.TEST_BEATS_URL || "https://app.testbeats.com";
+  }
+
+  /**
+   *
+   * @param {string} run_id
+   * @param {number} limit
+   * @returns {import('./beats.types').IErrorClustersResponse}
+   */
+  getErrorClusters(run_id, limit = 3) {
+    return request.get({
+      url: `${this.getBaseUrl()}/api/core/v1/test-runs/${run_id}/error-clusters?limit=${limit}`,
+      headers: {
+        'x-api-key': this.config.api_key
+      }
+    });
+  }
+
+  /**
+   *
+   * @param {string} run_id
+   * @returns {import('./beats.types').IFailureAnalysisMetric[]}
+   */
+  getFailureAnalysis(run_id) {
+    return request.get({
+      url: `${this.getBaseUrl()}/api/core/v1/test-runs/${run_id}/failure-analysis`,
+      headers: {
+        'x-api-key': this.config.api_key
+      }
+    });
+  }
+}
+
+module.exports = { BeatsApi }
+
+/***/ }),
+
+/***/ 3463:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const fs = __nccwpck_require__(9896);
+const path = __nccwpck_require__(6928);
+const zlib = __nccwpck_require__(3106);
+const stream = __nccwpck_require__(2203);
+const FormData = __nccwpck_require__(421);
+const ml = __nccwpck_require__(2794)
+const TestResult = __nccwpck_require__(2658);
+const { BeatsApi } = __nccwpck_require__(4285);
+const logger = __nccwpck_require__(1180);
+const TestAttachment = __nccwpck_require__(9662);
+
+const MAX_ATTACHMENTS_PER_REQUEST = 5;
+const MAX_ATTACHMENTS_PER_RUN = 20;
+const MAX_ATTACHMENT_SIZE = 2 * 1024 * 1024;
+
+class BeatsAttachments {
+
+  /**
+   * @param {import('../index').PublishReport} config
+   * @param {TestResult} result
+   */
+  constructor(config, result, test_run_id) {
+    this.config = config;
+    this.result = result;
+    this.api = new BeatsApi(config);
+    this.test_run_id = test_run_id;
+    this.failed_test_cases = [];
+    this.attachments = [];
+    this.compressed_attachment_paths = [];
+  }
+
+  async upload() {
+    this.#setAllFailedTestCases();
+    this.#setAttachments();
+    await this.#uploadAttachments();
+    this.#deleteCompressedAttachments();
+  }
+
+  #setAllFailedTestCases() {
+    for (const suite of this.result.suites) {
+      for (const test of suite.cases) {
+        if (test.status === 'FAIL') {
+          this.failed_test_cases.push(test);
+        }
+      }
+    }
+  }
+
+  #setAttachments() {
+    for (const test_case of this.failed_test_cases) {
+      for (const attachment of test_case.attachments) {
+        this.attachments.push(attachment);
+      }
+    }
+  }
+
+  async #uploadAttachments() {
+    if (this.attachments.length === 0) {
+      return;
+    }
+    logger.info(`⏳ Uploading ${this.attachments.length} attachments...`);
+    try {
+      let count = 0;
+      const size = MAX_ATTACHMENTS_PER_REQUEST;
+      for (let i = 0; i < this.attachments.length; i += size) {
+        if (count >= MAX_ATTACHMENTS_PER_RUN) {
+          logger.warn('⚠️ Maximum number of attachments per run reached. Skipping remaining attachments.');
+          break;
+        }
+        const attachments_subset = this.attachments.slice(i, i + size);
+        const form = new FormData();
+        form.append('test_run_id', this.test_run_id);
+        const file_images = []
+        for (const attachment of attachments_subset) {
+          let attachment_path = this.#getAttachmentFilePath(attachment);
+          if (!attachment_path) {
+            logger.warn(`⚠️ Unable to find attachment ${attachment.path}`);
+            continue;
+          }
+          attachment_path = await this.#compressAttachment(attachment_path);
+          const stats = fs.statSync(attachment_path);
+          if (stats.size > MAX_ATTACHMENT_SIZE) {
+            logger.warn(`⚠️ Attachment ${attachment.path} is too big (${stats.size} bytes). Allowed size is ${MAX_ATTACHMENT_SIZE} bytes.`);
+            continue;
+          }
+          form.append('images', fs.readFileSync(attachment_path), {
+            filename: path.basename(attachment_path),
+            filepath: attachment_path,
+            contentType: ml.getType(attachment.path),
+          });
+          file_images.push({
+            file_name: attachment.name,
+            file_path: attachment.path,
+          });
+          count += 1;
+        }
+        if (file_images.length === 0) {
+          return;
+        }
+        form.append('file_images', JSON.stringify(file_images));
+        await this.api.uploadAttachments(form.getHeaders(), form.getBuffer());
+        logger.info(`🏞️  Uploaded ${count} attachments`);
+      }
+    } catch (error) {
+      logger.error(`❌ Unable to upload attachments: ${error.message}`, error);
+    }
+  }
+
+  /**
+   *
+   * @param {TestAttachment} attachment
+   */
+  #getAttachmentFilePath(attachment) {
+    const result_file = this.config.results[0].files[0];
+    const result_file_dir = path.dirname(result_file);
+    const relative_attachment_path = path.join(result_file_dir, attachment.path);
+    const raw_attachment_path = attachment.path;
+
+    try {
+      fs.statSync(relative_attachment_path);
+      return relative_attachment_path;
+    } catch {
+      // nothing
+    }
+
+    try {
+      fs.statSync(raw_attachment_path);
+      return raw_attachment_path;
+    } catch {
+      // nothing
+    }
+
+    return null;
+  }
+
+  /**
+   *
+   * @param {string} attachment_path
+   */
+  #compressAttachment(attachment_path) {
+    return new Promise((resolve, _) => {
+      console.log(attachment_path)
+      if (attachment_path.endsWith('.br') || attachment_path.endsWith('.gz') || attachment_path.endsWith('.zst') || attachment_path.endsWith('.zip') || attachment_path.endsWith('.7z') || attachment_path.endsWith('.png') || attachment_path.endsWith('.jpg') || attachment_path.endsWith('.jpeg') || attachment_path.endsWith('.svg') || attachment_path.endsWith('.gif') || attachment_path.endsWith('.webp')) {
+        resolve(attachment_path);
+        return;
+      }
+      const read_stream = fs.createReadStream(attachment_path);
+      const br = zlib.createBrotliCompress();
+
+      const compressed_file_path = attachment_path + '.br';
+      const write_stream = fs.createWriteStream(compressed_file_path);
+      stream.pipeline(read_stream, br, write_stream, (err) => {
+        if (err) {
+          resolve(attachment_path);
+          return;
+        }
+        this.compressed_attachment_paths.push(compressed_file_path);
+        resolve(compressed_file_path);
+        return;
+      });
+    });
+  }
+
+  #deleteCompressedAttachments() {
+    for (const attachment_path of this.compressed_attachment_paths) {
+      fs.unlinkSync(attachment_path);
+    }
+  }
+
+}
+
+module.exports = { BeatsAttachments }
+
+/***/ }),
+
+/***/ 7859:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getCIInformation } = __nccwpck_require__(5664);
+const logger = __nccwpck_require__(1180);
+const { BeatsApi } = __nccwpck_require__(4285);
+const { HOOK, PROCESS_STATUS } = __nccwpck_require__(7011);
+const TestResult = __nccwpck_require__(2658);
+const { BeatsAttachments } = __nccwpck_require__(3463);
+
+class Beats {
+
+  /**
+   * @param {import('../index').PublishReport} config
+   * @param {TestResult} result
+   */
+  constructor(config, result) {
+    this.config = config;
+    this.result = result;
+    this.api = new BeatsApi(config);
+    this.test_run_id = '';
+    this.test_run = null;
+  }
+
+  async publish() {
+    this.#setApiKey();
+    if (!this.config.api_key) {
+      logger.warn('😿 No API key provided, skipping publishing results to TestBeats Portal...');
+      return;
+    }
+    this.#setCIInfo();
+    this.#setProjectName();
+    this.#setRunName();
+    await this.#publishTestResults();
+    await this.#uploadAttachments();
+    this.#updateTitleLink();
+    await this.#attachExtensions();
+  }
+
+  #setCIInfo() {
+    this.ci = getCIInformation();
+  }
+
+  #setProjectName() {
+    this.config.project = this.config.project || process.env.TEST_BEATS_PROJECT || (this.ci && this.ci.repository_name) || 'demo-project';
+  }
+
+  #setApiKey() {
+    this.config.api_key = this.config.api_key || process.env.TEST_BEATS_API_KEY;
+  }
+
+  #setRunName() {
+    this.config.run = this.config.run || process.env.TEST_BEATS_RUN || (this.ci && this.ci.build_name) || 'demo-run';
+    this.result.name = this.config.run;
+  }
+
+  async #publishTestResults() {
+    logger.info("🚀 Publishing results to TestBeats Portal...");
+    try {
+      const payload = this.#getPayload();
+      const response = await this.api.postTestRun(payload);
+      this.test_run_id = response.id;
+    } catch (error) {
+      logger.error(`❌ Unable to publish results to TestBeats Portal: ${error.message}`, error);
+    }
+  }
+
+  #getPayload() {
+    const payload = {
+      project: this.config.project,
+      run: this.config.run,
+      ...this.result
+    }
+    if (this.ci) {
+      payload.ci_details = [this.ci];
+    }
+    return payload;
+  }
+
+  async #uploadAttachments() {
+    if (!this.test_run_id) {
+      return;
+    }
+    if (this.result.status !== 'FAIL') {
+      return;
+    }
+    try {
+      const attachments = new BeatsAttachments(this.config, this.result, this.test_run_id);
+      await attachments.upload();
+    } catch (error) {
+      logger.error(`❌ Unable to upload attachments: ${error.message}`, error);
+    }
+  }
+
+  #updateTitleLink() {
+    if (!this.test_run_id) {
+      return;
+    }
+    if (!this.config.targets) {
+      return;
+    }
+    const link = `${this.api.getBaseUrl()}/reports/${this.test_run_id}`;
+    for (const target of this.config.targets) {
+      target.inputs.title_link = link;
+    }
+  }
+
+  async #attachExtensions() {
+    if (!this.test_run_id) {
+      return;
+    }
+    if (!this.config.targets) {
+      return;
+    }
+    await this.#attachFailureSummary();
+    await this.#attachFailureAnalysis();
+    await this.#attachSmartAnalysis();
+    await this.#attachErrorClusters();
+  }
+
+  async #attachFailureSummary() {
+    if (this.result.status !== 'FAIL') {
+      return;
+    }
+    if (this.config.show_failure_summary === false) {
+      return;
+    }
+    try {
+      logger.info('✨ Fetching AI Failure Summary...');
+      await this.#setTestRun(' AI Failure Summary', 'failure_summary_status');
+      this.config.extensions.push({
+        name: 'ai-failure-summary',
+        hook: HOOK.AFTER_SUMMARY,
+        inputs: {
+          data: this.test_run
+        }
+      });
+    } catch (error) {
+      logger.error(`❌ Unable to attach failure summary: ${error.message}`, error);
+    }
+  }
+
+  async #attachFailureAnalysis() {
+    if (this.result.status !== 'FAIL') {
+      return;
+    }
+    if (this.config.show_failure_analysis === false) {
+      return;
+    }
+    try {
+      logger.info('🪄 Fetching Failure Analysis...');
+      await this.#setTestRun('Failure Analysis Status', 'failure_analysis_status');
+      const metrics = await this.api.getFailureAnalysis(this.test_run_id);
+      this.config.extensions.push({
+        name: 'failure-analysis',
+        hook: HOOK.AFTER_SUMMARY,
+        inputs: {
+          data: metrics
+        }
+      });
+    } catch (error) {
+      logger.error(`❌ Unable to attach failure analysis: ${error.message}`, error);
+    }
+  }
+
+  async #attachSmartAnalysis() {
+    if (this.config.show_smart_analysis === false) {
+      return;
+    }
+    try {
+      logger.info('🤓 Fetching Smart Analysis...');
+      await this.#setTestRun('Smart Analysis', 'smart_analysis_status');
+      this.config.extensions.push({
+        name: 'smart-analysis',
+        hook: HOOK.AFTER_SUMMARY,
+        inputs: {
+          data: this.test_run
+        }
+      });
+    } catch (error) {
+      logger.error(`❌ Unable to attach smart analysis: ${error.message}`, error);
+    }
+  }
+
+  #getDelay() {
+    if (process.env.TEST_BEATS_DELAY) {
+      return parseInt(process.env.TEST_BEATS_DELAY);
+    }
+    return 3000;
+  }
+
+  async #setTestRun(text, wait_for = 'smart_analysis_status') {
+    if (this.test_run && this.test_run[wait_for] === PROCESS_STATUS.COMPLETED) {
+      return;
+    }
+    let retry = 3;
+    while (retry >= 0) {
+      retry = retry - 1;
+      await new Promise(resolve => setTimeout(resolve, this.#getDelay()));
+      this.test_run = await this.api.getTestRun(this.test_run_id);
+      const status = this.test_run && this.test_run[wait_for];
+      switch (status) {
+        case PROCESS_STATUS.COMPLETED:
+          logger.debug(`☑️ ${text} generated successfully`);
+          return;
+        case PROCESS_STATUS.FAILED:
+          logger.error(`❌ Failed to generate ${text}`);
+          return;
+        case PROCESS_STATUS.SKIPPED:
+          logger.warn(`❗ Skipped generating ${text}`);
+          return;
+      }
+      logger.info(`🔄 ${text} not generated, retrying...`);
+    }
+    logger.warn(`🙈 ${text} not generated in given time`);
+  }
+
+  async #attachErrorClusters() {
+    if (this.result.status !== 'FAIL') {
+      return;
+    }
+    if (this.config.show_error_clusters === false) {
+      return;
+    }
+    try {
+      logger.info('🧮 Fetching Error Clusters...');
+      const res = await this.api.getErrorClusters(this.test_run_id, 3);
+      this.config.extensions.push({
+        name: 'error-clusters',
+        hook: HOOK.AFTER_SUMMARY,
+        inputs: {
+          data: res.values
+        }
+      });
+    } catch (error) {
+      logger.error(`❌ Unable to attach error clusters: ${error.message}`, error);
+    }
+  }
+
+}
+
+module.exports = { Beats }
+
+/***/ }),
+
+/***/ 874:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const TestResult = __nccwpck_require__(2658);
+const { Beats } = __nccwpck_require__(7859);
+
+/**
+ * @param {import('../index').PublishReport} config
+ * @param {TestResult} result
+ */
+async function run(config, result) {
+  const beats = new Beats(config, result);
+  await beats.publish();
+}
+
+module.exports = { run }
+
+/***/ }),
+
+/***/ 3843:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const path = __nccwpck_require__(6928);
+const trp = __nccwpck_require__(4968);
+const prp = __nccwpck_require__(3874);
+const os = __nccwpck_require__(857);
+
+const beats = __nccwpck_require__(874);
+const { ConfigBuilder } = __nccwpck_require__(5891);
+const target_manager = __nccwpck_require__(53);
+const logger = __nccwpck_require__(1180);
+const { processData } = __nccwpck_require__(7996);
+const pkg = __nccwpck_require__(9841);
+const { MIN_NODE_VERSION } = __nccwpck_require__(7011);
+
+class PublishCommand {
+
+  /**
+   * @param {import('../index').CommandLineOptions} opts
+   */
+  constructor(opts) {
+    this.opts = opts;
+    this.errors = [];
+  }
+
+  async publish() {
+    logger.info(`🥁 TestBeats v${pkg.version}`);
+
+    this.#validateEnvDetails();
+    this.#buildConfig();
+    this.#validateOptions();
+    this.#setConfigFromFile();
+    this.#mergeConfigOptions();
+    this.#processConfig();
+    this.#validateConfig();
+    this.#processResults();
+    await this.#publishResults();
+    await this.#publishErrors();
+  }
+
+  #validateEnvDetails() {
+    try {
+      const current_major_version = parseInt(process.version.split('.')[0].replace('v', ''));
+      if (current_major_version >= MIN_NODE_VERSION) {
+        logger.info(`💻 NodeJS: ${process.version}, OS: ${os.platform()}, Version: ${os.release()}, Arch: ${os.machine()}`);
+        return;
+      }
+    } catch (error) {
+      logger.warn(`⚠️ Unable to verify NodeJS version: ${error.message}`);
+      return;
+    }
+    throw new Error(`❌ Supported NodeJS version is >= v${MIN_NODE_VERSION}. Current version is ${process.version}`)
+  }
+
+  #buildConfig() {
+    const config_builder = new ConfigBuilder(this.opts);
+    config_builder.build();
+  }
+
+  #validateOptions() {
+    if (!this.opts) {
+      throw new Error('Missing publish options');
+    }
+    if (!this.opts.config) {
+      throw new Error('Missing publish config');
+    }
+  }
+
+  #setConfigFromFile() {
+    if (typeof this.opts.config === 'string') {
+      const cwd = process.cwd();
+      const file_path = path.join(cwd, this.opts.config);
+      try {
+        const config_json = __nccwpck_require__(4535)(path.join(cwd, this.opts.config));
+        this.opts.config = config_json;
+      } catch (error) {
+        throw new Error(`Failed to read config file: '${file_path}' with error: '${error.message}'`);
+      }
+    }
+  }
+
+  #mergeConfigOptions() {
+    if (this.opts.config && typeof this.opts.config === 'object') {
+      this.opts.config.project = this.opts.project || this.opts.config.project;
+      this.opts.config.run = this.opts.run || this.opts.config.run;
+      this.opts.config.api_key = this.opts['api-key'] || this.opts.config.api_key;
+    }
+  }
+
+  #processConfig() {
+    const processed_config = processData(this.opts.config);
+    /**@type {import('../index').PublishConfig[]} */
+    this.configs = [];
+    if (processed_config.reports) {
+      for (const report of processed_config.reports) {
+        this.configs.push(report);
+      }
+    } else {
+      this.configs.push(processed_config);
+    }
+  }
+
+  #validateConfig() {
+    logger.info("🚓 Validating configuration...")
+    for (const config of this.configs) {
+      this.#validateResults(config);
+      this.#validateTargets(config);
+    }
+  }
+
+  /**
+ *
+ * @param {import('../index').PublishReport} config
+ */
+  #validateResults(config) {
+    logger.debug("Validating results...")
+    if (!config.results) {
+      throw new Error('Missing results properties in config');
+    }
+    if (!Array.isArray(config.results)) {
+      throw new Error(`'config.results' must be an array`);
+    }
+    if (!config.results.length) {
+      throw new Error('At least one result must be defined');
+    }
+    for (const result of config.results) {
+      if (!result.type) {
+        throw new Error('Missing result type');
+      }
+      if (result.type === 'custom') {
+        if (!result.result) {
+          throw new Error(`custom 'config.results[*].result' is missing`);
+        }
+      } else {
+        if (!result.files) {
+          throw new Error('Missing result files');
+        }
+        if (!Array.isArray(result.files)) {
+          throw new Error('result files must be an array');
+        }
+        if (!result.files.length) {
+          throw new Error('At least one result file must be defined');
+        }
+      }
+    }
+    logger.debug("Validating results - Successful!")
+  }
+
+  /**
+   *
+   * @param {import('../index').PublishReport} config
+   */
+  #validateTargets(config) {
+    logger.debug("Validating targets...")
+    if (!config.targets) {
+      logger.warn('⚠️ Targets are not defined in config');
+      return;
+    }
+    if (!Array.isArray(config.targets)) {
+      throw new Error('targets must be an array');
+    }
+    for (const target of config.targets) {
+      if (target.enable === false || target.enable === 'false') {
+        continue;
+      }
+      if (!target.name) {
+        throw new Error(`'config.targets[*].name' is missing`);
+      }
+      if (target.name === 'slack' || target.name === 'teams' || target.name === 'chat') {
+        if (!target.inputs) {
+          throw new Error(`missing inputs in ${target.name} target`);
+        }
+      }
+      if (target.inputs) {
+        const inputs = target.inputs;
+        if (target.name === 'slack' || target.name === 'teams' || target.name === 'chat') {
+          if (!inputs.url) {
+            throw new Error(`missing url in ${target.name} target inputs`);
+          }
+          if (typeof inputs.url !== 'string') {
+            throw new Error(`url in ${target.name} target inputs must be a string`);
+          }
+          if (!inputs.url.startsWith('http')) {
+            throw new Error(`url in ${target.name} target inputs must start with 'http' or 'https'`);
+          }
+        }
+      }
+    }
+    logger.debug("Validating targets - Successful!")
+  }
+
+  #processResults() {
+    logger.info('🧙 Processing results...');
+    this.results = [];
+    for (const config of this.configs) {
+      for (const result_options of config.results) {
+        if (result_options.type === 'custom') {
+          this.results.push(result_options.result);
+        } else if (result_options.type === 'jmeter') {
+          this.results.push(prp.parse(result_options));
+        } else {
+          const { result, errors } = trp.parseV2(result_options);
+          if (result) {
+            this.results.push(result);
+          }
+          if (errors) {
+            this.errors = this.errors.concat(errors);
+          }
+        }
+      }
+    }
+  }
+
+  async #publishResults() {
+    if (!this.results.length) {
+      logger.warn('⚠️ No results to publish');
+      return;
+    }
+
+    for (const config of this.configs) {
+      for (let i = 0; i < this.results.length; i++) {
+        const result = this.results[i];
+        config.extensions = config.extensions || [];
+        await beats.run(config, result);
+        if (config.targets) {
+          for (const target of config.targets) {
+            if (target.enable === false || target.enable === 'false') {
+              continue;
+            }
+            target.extensions = target.extensions || [];
+            target.extensions = config.extensions.concat(target.extensions);
+            await target_manager.run(target, result);
+          }
+        } else {
+          logger.warn('⚠️ No targets defined, skipping sending results to targets');
+        }
+      }
+    }
+    logger.info('✅ Results published successfully!');
+  }
+
+  async #publishErrors() {
+    if (!this.errors.length) {
+      logger.debug('⚠️ No errors to publish');
+      return;
+    }
+    logger.info('🛑 Publishing errors...');
+    for (const config of this.configs) {
+      if (config.targets) {
+        for (const target of config.targets) {
+          await target_manager.handleErrors({ target, errors: this.errors });
+        }
+      }
+    }
+    throw new Error(this.errors.join('\n'));
+  }
+
+}
+
+module.exports = { PublishCommand }
+
+
+/***/ }),
+
+/***/ 5288:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { BaseExtension } = __nccwpck_require__(1657);
+const { STATUS, HOOK } = __nccwpck_require__(7011);
+
+
+class AIFailureSummaryExtension extends BaseExtension {
+
+  constructor(target, extension, result, payload, root_payload) {
+    super(target, extension, result, payload, root_payload);
+    this.#setDefaultOptions();
+    this.#setDefaultInputs();
+    this.updateExtensionInputs();
+  }
+
+  run() {
+    this.#setText();
+    this.attach();
+  }
+
+  #setDefaultOptions() {
+    this.default_options.hook = HOOK.AFTER_SUMMARY,
+    this.default_options.condition = STATUS.PASS_OR_FAIL;
+  }
+
+  #setDefaultInputs() {
+    this.default_inputs.title = 'AI Failure Summary ✨';
+    this.default_inputs.title_link = '';
+  }
+
+  #setText() {
+    const data = this.extension.inputs.data;
+    if (!data) {
+      return;
+    }
+
+    /**
+     * @type {import('../beats/beats.types').IBeatExecutionMetric}
+     */
+    const execution_metrics = data.execution_metrics[0];
+    this.text = execution_metrics.failure_summary;
+  }
+}
+
+module.exports =  { AIFailureSummaryExtension }
+
+/***/ }),
+
+/***/ 1657:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const logger = __nccwpck_require__(1180);
+const { addChatExtension, addSlackExtension, addTeamsExtension } = __nccwpck_require__(1213);
+
+class BaseExtension {
+
+  /**
+   *
+   * @param {import('..').ITarget} target
+   * @param {import('..').IExtension} extension
+   * @param {import('..').TestResult} result
+   * @param {any} payload
+   * @param {any} root_payload
+   */
+  constructor(target, extension, result, payload, root_payload) {
+    this.target = target;
+    this.extension = extension;
+    this.result = result;
+    this.payload = payload;
+    this.root_payload = root_payload;
+
+    this.text = '';
+
+    /**
+     * @type {import('..').ExtensionInputs}
+     */
+    this.default_inputs = {};
+
+    /**
+     * @type {import('..').IExtensionDefaultOptions}
+     */
+    this.default_options = {};
+  }
+
+  updateExtensionInputs() {
+    this.extension.inputs = Object.assign({}, this.default_inputs, this.extension.inputs);
+    switch (this.target.name) {
+      case 'teams':
+        this.extension.inputs = Object.assign({}, { separator: true }, this.extension.inputs);
+        break;
+      case 'slack':
+        this.extension.inputs = Object.assign({}, { separator: false }, this.extension.inputs);
+        break;
+      case 'chat':
+        this.extension.inputs = Object.assign({}, { separator: true }, this.extension.inputs);
+        break;
+      default:
+        break;
+    }
+  }
+
+  attach() {
+    if (!this.text) {
+      logger.debug(`⚠️ Extension '${this.extension.name}' has no text. Skipping.`);
+      return;
+    }
+
+    switch (this.target.name) {
+      case 'teams':
+        addTeamsExtension({ payload: this.payload, extension: this.extension, text: this.text });
+        break;
+      case 'slack':
+        addSlackExtension({ payload: this.payload, extension: this.extension, text: this.text });
+        break;
+      case 'chat':
+        addChatExtension({ payload: this.payload, extension: this.extension, text: this.text });
+        break;
+      default:
+        break;
+    }
+  }
+
+  /**
+   * @param {string[]} texts
+   */
+  mergeTexts(texts) {
+    const _texts = texts.filter(text => !!text);
+    switch (this.target.name) {
+      case 'teams':
+        return _texts.join('\n\n');
+      case 'slack':
+        return _texts.join('\n');
+      case 'chat':
+        return _texts.join('<br>');
+      default:
+        break;
+    }
+  }
+
+  /**
+   * @param {string|number} text
+   */
+  bold(text) {
+    switch (this.target.name) {
+      case 'teams':
+        return `**${text}**`;
+      case 'slack':
+        return `*${text}*`;
+      case 'chat':
+        return `<b>${text}</b>`;
+      default:
+        break;
+    }
+  }
+
+}
+
+module.exports = { BaseExtension }
+
+/***/ }),
+
+/***/ 4367:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { BaseExtension } = __nccwpck_require__(1657);
+const { getCIInformation } = __nccwpck_require__(5664);
+const { getMetaDataText } = __nccwpck_require__(7151);
+const { STATUS, HOOK } = __nccwpck_require__(7011);
+
+const COMMON_BRANCH_NAMES = ['main', 'master', 'dev', 'develop', 'qa', 'test'];
+
+class CIInfoExtension extends BaseExtension {
+
+  constructor(target, extension, result, payload, root_payload) {
+    super(target, extension, result, payload, root_payload);
+    this.#setDefaultOptions();
+    this.#setDefaultInputs();
+    this.updateExtensionInputs();
+
+    this.ci = null;
+    this.repository_elements = [];
+    this.build_elements = [];
+  }
+
+  #setDefaultOptions() {
+    this.default_options.hook = HOOK.AFTER_SUMMARY;
+    this.default_options.condition = STATUS.PASS_OR_FAIL;
+  }
+
+  #setDefaultInputs() {
+    this.default_inputs.title = '';
+    this.default_inputs.title_link = '';
+    this.default_inputs.show_repository_non_common = true;
+    this.default_inputs.show_repository = false;
+    this.default_inputs.show_repository_branch = false;
+    this.default_inputs.show_build = true;
+  }
+
+  async run() {
+    this.ci = getCIInformation();
+
+    this.#setRepositoryElements();
+    this.#setBuildElements();
+
+    const repository_text = await getMetaDataText({ elements: this.repository_elements, target: this.target, extension: this.extension, result: this.result, default_condition: this.default_options.condition });
+    const build_text = await getMetaDataText({ elements: this.build_elements, target: this.target, extension: this.extension, result: this.result, default_condition: this.default_options.condition });
+    this.text = this.mergeTexts([repository_text, build_text]);
+    this.attach();
+  }
+
+  #setRepositoryElements() {
+    if (!this.ci) {
+      return;
+    }
+    if (!this.ci.repository_url || !this.ci.repository_name || !this.ci.repository_ref) {
+      return;
+    }
+
+    if (this.extension.inputs.show_repository) {
+      this.#setRepositoryElement();
+    }
+    if (this.extension.inputs.show_repository_branch) {
+      if (this.ci.repository_ref.includes('refs/pull')) {
+        this.#setPullRequestElement();
+      } else {
+        this.#setRepositoryBranchElement();
+      }
+    }
+    if (!this.extension.inputs.show_repository && !this.extension.inputs.show_repository_branch && this.extension.inputs.show_repository_non_common) {
+      if (this.ci.repository_ref.includes('refs/pull')) {
+        this.#setRepositoryElement();
+        this.#setPullRequestElement();
+      } else {
+        const branch_name = this.ci.repository_ref.replace('refs/heads/', '');
+        if (!COMMON_BRANCH_NAMES.includes(branch_name.toLowerCase())) {
+          this.#setRepositoryElement();
+          this.#setRepositoryBranchElement();
+        }
+      }
+    }
+  }
+
+  #setRepositoryElement() {
+    this.repository_elements.push({ label: 'Repository', key: this.ci.repository_name, value: this.ci.repository_url, type: 'hyperlink' });
+  }
+
+  #setPullRequestElement() {
+    const pr_url = this.ci.repository_url + this.ci.repository_ref.replace('refs/pull/', '/pull/');
+    const pr_name = this.ci.repository_ref.replace('refs/pull/', '').replace('/merge', '');
+    this.repository_elements.push({ label: 'Pull Request', key: pr_name, value: pr_url, type: 'hyperlink' });
+  }
+
+  #setRepositoryBranchElement() {
+    const branch_url = this.ci.repository_url + this.ci.repository_ref.replace('refs/heads/', '/tree/');
+    const branch_name = this.ci.repository_ref.replace('refs/heads/', '');
+    this.repository_elements.push({ label: 'Branch', key: branch_name, value: branch_url, type: 'hyperlink' });
+  }
+
+  #setBuildElements() {
+    if (!this.ci) {
+      return;
+    }
+
+    if (this.extension.inputs.show_build && this.ci.build_url) {
+      const name = (this.ci.build_name || 'Build') + (this.ci.build_number ? ` #${this.ci.build_number}` : '');
+      this.build_elements.push({ label: 'Build', key: name, value: this.ci.build_url, type: 'hyperlink' });
+    }
+    if (this.extension.inputs.data) {
+      this.build_elements = this.build_elements.concat(this.extension.inputs.data);
+    }
+  }
+
+}
+
+module.exports = { CIInfoExtension };
+
+/***/ }),
+
+/***/ 3679:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const path = __nccwpck_require__(6928);
+const { BaseExtension } = __nccwpck_require__(1657);
+const { STATUS, HOOK } = __nccwpck_require__(7011);
+
+class CustomExtension extends BaseExtension {
+
+  /**
+   * @param {import('..').CustomExtension} extension
+   */
+  constructor(target, extension, result, payload, root_payload) {
+    super(target, extension, result, payload, root_payload);
+    this.extension = extension;
+    this.#setDefaultOptions();
+    this.updateExtensionInputs();
+  }
+
+  #setDefaultOptions() {
+    this.default_options.hook = HOOK.END,
+    this.default_options.condition = STATUS.PASS_OR_FAIL;
+  }
+
+  async run() {
+    const params = this.#getParams();
+    if (typeof this.extension.inputs.load === 'string') {
+      const cwd = process.cwd();
+      const extension_runner = __nccwpck_require__(1635)(path.join(cwd, this.extension.inputs.load));
+      await extension_runner.run(params);
+    } else if (typeof this.extension.inputs.load === 'function') {
+      await this.extension.inputs.load(params);
+    } else {
+      throw `Invalid 'load' input in custom extension - ${this.extension.inputs.load}`;
+    }
+  }
+
+  #getParams() {
+    return {
+      target: this.target,
+      extension: this.extension,
+      payload: this.payload,
+      root_payload: this.root_payload,
+      result: this.result
+    }
+  }
+
+}
+
+module.exports = { CustomExtension }
+
+/***/ }),
+
+/***/ 1222:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { BaseExtension } = __nccwpck_require__(1657);
+const { STATUS, HOOK } = __nccwpck_require__(7011);
+const { truncate } = __nccwpck_require__(7996);
+
+class ErrorClustersExtension extends BaseExtension {
+
+  constructor(target, extension, result, payload, root_payload) {
+    super(target, extension, result, payload, root_payload);
+    this.#setDefaultOptions();
+    this.#setDefaultInputs();
+    this.updateExtensionInputs();
+  }
+
+  run() {
+    this.#setText();
+    this.attach();
+  }
+
+  #setDefaultOptions() {
+    this.default_options.hook = HOOK.AFTER_SUMMARY,
+    this.default_options.condition = STATUS.PASS_OR_FAIL;
+  }
+
+  #setDefaultInputs() {
+    this.default_inputs.title = 'Top Errors';
+    this.default_inputs.title_link = '';
+  }
+
+  #setText() {
+    const data = this.extension.inputs.data;
+    if (!data || !data.length) {
+      return;
+    }
+
+    const clusters = data;
+
+    const texts = [];
+    for (const cluster of clusters) {
+      texts.push(`${truncate(cluster.failure, 150)} - ${this.bold(`(x${cluster.count})`)}`);
+    }
+    this.text = this.mergeTexts(texts);
+  }
+}
+
+module.exports =  { ErrorClustersExtension }
+
+/***/ }),
+
+/***/ 4311:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { BaseExtension } = __nccwpck_require__(1657);
+const { STATUS, HOOK } = __nccwpck_require__(7011);
+
+class FailureAnalysisExtension extends BaseExtension {
+
+  constructor(target, extension, result, payload, root_payload) {
+    super(target, extension, result, payload, root_payload);
+    this.#setDefaultOptions();
+    this.#setDefaultInputs();
+    this.updateExtensionInputs();
+  }
+
+  #setDefaultOptions() {
+    this.default_options.hook = HOOK.AFTER_SUMMARY,
+    this.default_options.condition = STATUS.PASS_OR_FAIL;
+  }
+
+  #setDefaultInputs() {
+    this.default_inputs.title = '';
+    this.default_inputs.title_link = '';
+  }
+
+  run() {
+    this.#setText();
+    this.attach();
+  }
+
+  #setText() {
+    /**
+     * @type {import('../beats/beats.types').IFailureAnalysisMetric[]}
+     */
+    const metrics = this.extension.inputs.data;
+    if (!metrics || metrics.length === 0) {
+      logger.warn('⚠️ No failure analysis metrics found. Skipping.');
+      return;
+    }
+
+    const to_investigate = metrics.find(metric => metric.name === 'To Investigate');
+    const auto_analysed = metrics.find(metric => metric.name === 'Auto Analysed');
+
+    const failure_analysis = [];
+
+    if (to_investigate && to_investigate.count > 0) {
+      failure_analysis.push(`🔎 To Investigate: ${to_investigate.count}`);
+    }
+    if (auto_analysed && auto_analysed.count > 0) {
+      failure_analysis.push(`🪄 Auto Analysed: ${auto_analysed.count}`);
+    }
+
+    if (failure_analysis.length === 0) {
+      return;
+    }
+
+    this.text = failure_analysis.join('    ');
+  }
+
+}
+
+module.exports =  { FailureAnalysisExtension };
+
+/***/ }),
+
+/***/ 6936:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { STATUS, HOOK } = __nccwpck_require__(7011);
+const { addChatExtension, addSlackExtension, addTeamsExtension } = __nccwpck_require__(1213);
+const { getTeamsMetaDataText, getSlackMetaDataText, getChatMetaDataText } = __nccwpck_require__(7151);
+
+async function run({ target, extension, payload, result }) {
+  const elements = get_elements(extension.inputs.links);
+  if (target.name === 'teams') {
+    extension.inputs = Object.assign({}, default_inputs_teams, extension.inputs);
+    const text = await getTeamsMetaDataText({ elements, target, extension, result, default_condition: default_options.condition });
+    if (text) {
+      addTeamsExtension({ payload, extension, text });
+    }
+  } else if (target.name === 'slack') {
+    extension.inputs = Object.assign({}, default_inputs_slack, extension.inputs);
+    extension.inputs.block_type = 'context';
+    const text = await getSlackMetaDataText({ elements, target, extension, result, default_condition: default_options.condition });
+    if (text) {
+      addSlackExtension({ payload, extension, text });
+    }
+  } else if (target.name === 'chat') {
+    extension.inputs = Object.assign({}, default_inputs_chat, extension.inputs);
+    const text = await getChatMetaDataText({ elements, target, extension, result, default_condition: default_options.condition });
+    if (text) {
+      addChatExtension({ payload, extension, text });
+    }
+  }
+}
+
+/**
+ * 
+ * @param {import("..").Link[]} links 
+ */
+function get_elements(links) {
+  return links.map(_ => { return { key: _.text, value: _.url, type: 'hyperlink', condition: _.condition } });
+}
+
+const default_options = {
+  hook: HOOK.END,
+  condition: STATUS.PASS_OR_FAIL,
+}
+
+const default_inputs_teams = {
+  title: '',
+  separator: true
+}
+
+const default_inputs_slack = {
+  title: '',
+  separator: false
+}
+
+const default_inputs_chat = {
+  title: '',
+  separator: true
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+/***/ }),
+
+/***/ 9171:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const hyperlinks = __nccwpck_require__(6936);
+const mentions = __nccwpck_require__(6587);
+const rp_analysis = __nccwpck_require__(431);
+const rp_history = __nccwpck_require__(8589);
+const qc_test_summary = __nccwpck_require__(191);
+const percy_analysis = __nccwpck_require__(9851);
+const metadata = __nccwpck_require__(62);
+const { AIFailureSummaryExtension } = __nccwpck_require__(5288);
+const { SmartAnalysisExtension } = __nccwpck_require__(9014);
+const { CIInfoExtension } = __nccwpck_require__(4367);
+const { CustomExtension } = __nccwpck_require__(3679);
+const { EXTENSION } = __nccwpck_require__(7011);
+const { checkCondition } = __nccwpck_require__(7996);
+const logger = __nccwpck_require__(1180);
+const { ErrorClustersExtension } = __nccwpck_require__(1222);
+const { FailureAnalysisExtension } = __nccwpck_require__(4311);
+
+async function run(options) {
+  const { target, result, hook } = options;
+  /**
+   * @type {import("..").IExtension[]}
+   */
+  const extensions = target.extensions || [];
+  for (let i = 0; i < extensions.length; i++) {
+    const extension = extensions[i];
+    if (extension.enable === false || extension.enable === 'false') {
+      continue;
+    }
+    const extension_runner = getExtensionRunner(extension, options);
+    const extension_options = Object.assign({}, extension_runner.default_options, extension);
+    if (extension_options.hook === hook) {
+      if (await checkCondition({ condition: extension_options.condition, result, target, extension })) {
+        extension.outputs = {};
+        options.extension = extension;
+        try {
+          await extension_runner.run(options);
+        } catch (error) {
+          logger.error(`Failed to run extension: ${error.message}`);
+          logger.debug(`Extension details`, extension);
+          logger.debug(`Error: `, error);
+        }
+      }
+    }
+  }
+}
+
+function getExtensionRunner(extension, options) {
+  switch (extension.name) {
+    case EXTENSION.HYPERLINKS:
+      return hyperlinks;
+    case EXTENSION.MENTIONS:
+      return mentions;
+    case EXTENSION.REPORT_PORTAL_ANALYSIS:
+      return rp_analysis;
+    case EXTENSION.REPORT_PORTAL_HISTORY:
+      return rp_history;
+    case EXTENSION.QUICK_CHART_TEST_SUMMARY:
+      return qc_test_summary;
+    case EXTENSION.PERCY_ANALYSIS:
+      return percy_analysis;
+    case EXTENSION.CUSTOM:
+      return new CustomExtension(options.target, extension, options.result, options.payload, options.root_payload);
+    case EXTENSION.METADATA:
+      return metadata;
+    case EXTENSION.CI_INFO:
+      return new CIInfoExtension(options.target, extension, options.result, options.payload, options.root_payload);
+    case EXTENSION.AI_FAILURE_SUMMARY:
+      return new AIFailureSummaryExtension(options.target, extension, options.result, options.payload, options.root_payload);
+    case EXTENSION.FAILURE_ANALYSIS:
+      return new FailureAnalysisExtension(options.target, extension, options.result, options.payload, options.root_payload);
+    case EXTENSION.SMART_ANALYSIS:
+      return new SmartAnalysisExtension(options.target, extension, options.result, options.payload, options.root_payload);
+    case EXTENSION.ERROR_CLUSTERS:
+      return new ErrorClustersExtension(options.target, extension, options.result, options.payload, options.root_payload);
+    default:
+      return require(extension.name);
+  }
+}
+
+module.exports = {
+  run
+}
+
+/***/ }),
+
+/***/ 6587:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getOnCallPerson } = __nccwpck_require__(6469);
+const { addSlackExtension, addTeamsExtension } = __nccwpck_require__(1213);
+const { HOOK, STATUS } = __nccwpck_require__(7011);
+
+function run({ target, extension, payload, root_payload }) {
+  if (target.name === 'teams') {
+    extension.inputs = Object.assign({}, default_inputs_teams, extension.inputs);
+    attachForTeam({ extension, payload });
+  } else if (target.name === 'slack') {
+    extension.inputs = Object.assign({}, default_inputs_slack, extension.inputs);
+    attachForSlack({ extension, payload });
+  } else if (target.name === 'chat') {
+    extension.inputs = Object.assign({}, default_inputs_chat, extension.inputs);
+    attachForChat({ extension, root_payload });
+  }
+}
+
+function attachForTeam({ extension, payload }) {
+  const users = getUsers(extension);
+  if (users.length > 0) {
+    setPayloadWithMSTeamsEntities(payload);
+    const users_ats = users.map(user => `<at>${user.name}</at>`);
+    addTeamsExtension({ payload, extension, text: users_ats.join(' ｜ ')});
+    for (const user of users) {
+      payload.msteams.entities.push({
+        "type": "mention",
+        "text": `<at>${user.name}</at>`,
+        "mentioned": {
+          "id": user.teams_upn,
+          "name": user.name
+        }
+      });
+    }
+  }
+}
+
+function formatSlackMentions({slack_uid, slack_gid}) {
+  if (slack_gid && slack_uid) {
+    throw new Error(`Error in slack extension configuration. Either slack user or group Id is allowed`);
+  }
+  if (slack_uid) {
+    return `<@${slack_uid}>`
+  }
+  const tagPrefix = ["here", "everyone", "channel"].includes(slack_gid.toLowerCase()) ? "" : "subteam^";
+  return `<!${tagPrefix}${slack_gid}>`
+}
+
+function attachForSlack({ extension, payload }) {
+  const users = getUsers(extension);
+  const user_ids = users.map(formatSlackMentions);
+  if (users.length > 0) {
+    addSlackExtension({ payload, extension, text: user_ids.join(' ｜ ') });
+  }
+}
+
+function attachForChat({ extension, root_payload }) {
+  const users = getUsers(extension);
+  const user_ids = users.map(user => `<users/${user.chat_uid}>`);
+  if (users.length > 0) {
+    root_payload.text = user_ids.join(' ｜ ');
+  }
+}
+
+function getUsers(extension) {
+  const users = [];
+  if (extension.inputs.users) {
+    users.push(...extension.inputs.users);
+  }
+  if (extension.inputs.schedule) {
+    const user = getOnCallPerson(extension.inputs.schedule);
+    if (user) {
+      users.push(user);
+    } else {
+      // TODO: warn message for no on-call person
+    }
+  }
+  return users;
+}
+
+function setPayloadWithMSTeamsEntities(payload) {
+  if (!payload.msteams) {
+    payload.msteams = {};
+  }
+  if (!payload.msteams.entities) {
+    payload.msteams.entities = [];
+  }
+}
+
+const default_options = {
+  hook: HOOK.AFTER_SUMMARY,
+  condition: STATUS.FAIL
+}
+
+const default_inputs_teams = {
+  title: '',
+  separator: true
+}
+
+const default_inputs_slack = {
+  title: '',
+  separator: false
+}
+
+const default_inputs_chat = {
+  title: '',
+  separator: true
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+/***/ }),
+
+/***/ 62:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { HOOK, STATUS } = __nccwpck_require__(7011);
+const { addChatExtension, addSlackExtension, addTeamsExtension } = __nccwpck_require__(1213);
+const { getTeamsMetaDataText, getSlackMetaDataText, getChatMetaDataText } = __nccwpck_require__(7151);
+
+/**
+ * @param {object} param0
+ * @param {import('..').ITarget} param0.target
+ * @param {import('..').MetadataExtension} param0.extension
+ */
+async function run({ target, extension, result, payload, root_payload }) {
+  if (target.name === 'teams') {
+    extension.inputs = Object.assign({}, default_inputs_teams, extension.inputs);
+    await attachForTeams({ target, extension, payload, result });
+  } else if (target.name === 'slack') {
+    extension.inputs = Object.assign({}, default_inputs_slack, extension.inputs);
+    await attachForSlack({ target, extension, payload, result });
+  } else if (target.name === 'chat') {
+    extension.inputs = Object.assign({}, default_inputs_chat, extension.inputs);
+    await attachForChat({ target, extension, payload, result });
+  }
+}
+
+/**
+ * @param {object} param0
+ * @param {import('..').MetadataExtension} param0.extension
+ */
+async function attachForTeams({ target, extension, payload, result }) {
+  const text = await getTeamsMetaDataText({
+    elements: extension.inputs.data,
+    target,
+    extension,
+    result,
+    default_condition: default_options.condition
+  });
+  if (text) {
+    addTeamsExtension({ payload, extension, text });
+  }
+}
+
+async function attachForSlack({ target, extension, payload, result }) {
+  const text = await getSlackMetaDataText({
+    elements: extension.inputs.data,
+    target,
+    extension,
+    result,
+    default_condition: default_options.condition
+  });
+  if (text) {
+    addSlackExtension({ payload, extension, text });
+  }
+}
+
+async function attachForChat({ target, extension, payload, result }) {
+  const text = await getChatMetaDataText({
+    elements: extension.inputs.data,
+    target,
+    extension,
+    result,
+    default_condition: default_options.condition
+  });
+  if (text) {
+    addChatExtension({ payload, extension, text });
+  }
+}
+
+const default_options = {
+  hook: HOOK.END,
+  condition: STATUS.PASS_OR_FAIL
+}
+
+const default_inputs_teams = {
+  title: '',
+  separator: true
+}
+
+const default_inputs_slack = {
+  title: '',
+  separator: false
+}
+
+const default_inputs_chat = {
+  title: '',
+  separator: true
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+/***/ }),
+
+/***/ 9851:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const retry = __nccwpck_require__(5195);
+const { getProjectByName, getLastBuild, getBuild, getRemovedSnapshots } = __nccwpck_require__(4457);
+const { HOOK, STATUS, URLS } = __nccwpck_require__(7011);
+const { addChatExtension, addSlackExtension, addTeamsExtension } = __nccwpck_require__(1213);
+
+/**
+ * 
+ * @param {object} param0 
+ * @param {import('../index').PercyAnalysisExtension} param0.extension 
+ */
+async function run({ extension, payload, target }) {
+  extension.inputs = Object.assign({}, default_inputs, extension.inputs);
+  await initialize(extension);
+  if (target.name === 'teams') {
+    extension.inputs = Object.assign({}, default_inputs_teams, extension.inputs);
+    attachForTeams({ payload, extension });
+  } else if (target.name === 'slack') {
+    extension.inputs = Object.assign({}, default_inputs_slack, extension.inputs);
+    attachForSlack({ payload, extension });
+  } else if (target.name === 'chat') {
+    extension.inputs = Object.assign({}, default_inputs_chat, extension.inputs);
+    attachForChat({ payload, extension });
+  }
+}
+
+/**
+ * @param {import('../index').PercyAnalysisExtension} extension 
+ */
+async function initialize(extension) {
+  const { inputs } = extension;
+  if (!inputs.build_id) {
+    await setBuildByLastRun(extension);
+  } else {
+    await setBuild(extension);
+  }
+  await setRemovedSnapshots(extension);
+  if (!inputs.title_link && inputs.title_link_to_build) {
+    inputs.title_link = `https://percy.io/${inputs.organization_uid}/${inputs.project_name}/builds/${inputs.build_id}`;
+  }
+}
+
+/**
+ * @param {import('../index').PercyAnalysisExtension} extension 
+ */
+async function setBuildByLastRun(extension) {
+  const { inputs, outputs } = extension;
+  if (!inputs.project_id) {
+    await setProjectId(extension)
+  }
+  const response = await getLastFinishedBuild(extension);
+  inputs.build_id = response.data[0].id;
+  outputs.build = response.data[0];
+  if (!outputs.project) {
+    outputs.project = response.included.find(_item => _item.type === 'projects');
+  }
+  if (!inputs.project_name) {
+    inputs.project_name = outputs.project.attributes.name;
+  }
+  if (!inputs.organization_uid) {
+    inputs.organization_uid = getOrganizationUID(outputs.project.attributes['full-slug']);
+  }
+}
+
+/**
+ * @param {import('../index').PercyAnalysisExtension} extension 
+ */
+function getLastFinishedBuild(extension) {
+  const { inputs } = extension;
+  const minTimeout = 5000;
+
+  return retry(async () => {
+      let response;
+      try {
+          response = await getLastBuild(inputs);
+      } catch (error) {
+          throw new Error(`Error occurred while fetching the last build: ${error}`);
+      }
+      if (!response.data || !response.data[0] || !response.data[0].attributes) {
+          throw new Error(`Invalid response data: ${JSON.stringify(response)}`);
+      }
+      const state = response.data[0].attributes.state;
+      if (state !== "finished" && state !== "failed") {
+          throw new Error(`build is still '${state}'`);
+      }
+      return response;
+  }, { retries: inputs.retries, minTimeout });
+}
+
+/**
+ * @param {import('../index').PercyAnalysisExtension} extension 
+ */
+async function setProjectId(extension) {
+  const { inputs, outputs } = extension;
+  if (!inputs.project_name) {
+    throw "mandatory inputs 'build_id' or 'project_id' or 'project_name' are not provided for percy-analysis extension"
+  }
+  const response = await getProjectByName(inputs);
+  inputs.project_id = response.data.id;
+  outputs.project = response.data;
+}
+
+/**
+ * @param {import('../index').PercyAnalysisExtension} extension 
+ */
+async function setBuild(extension) {
+  const { inputs, outputs } = extension;
+  const response = await getBuild(inputs);
+  outputs.build = response.data;
+  outputs.project = response.included.find(_item => _item.type === 'projects');
+  if (!inputs.project_id) {
+    inputs.project_id = outputs.project.id;
+  }
+  if (!inputs.project_name) {
+    inputs.project_name = outputs.project.attributes.name;
+  }
+  if (!inputs.organization_uid) {
+    inputs.organization_uid = getOrganizationUID(outputs.project.attributes['full-slug']);
+  }
+}
+
+function getOrganizationUID(slug) {
+  return slug.split('/')[0];
+}
+
+/**
+ * @param {import('../index').PercyAnalysisExtension} extension 
+ */
+async function setRemovedSnapshots(extension) {
+  const response = await getRemovedSnapshots(extension.inputs);
+  extension.outputs.removed_snapshots = response.data;
+}
+
+function attachForTeams({ payload, extension }) {
+  const text = getAnalysisSummary(extension.outputs).join(' ｜ ');
+  addTeamsExtension({ payload, extension, text });
+}
+
+function attachForSlack({ payload, extension }) {
+  const text = getAnalysisSummary(extension.outputs, '*', '*').join(' ｜ ');
+  addSlackExtension({ payload, extension, text });
+}
+
+function attachForChat({ payload, extension }) {
+  const text = getAnalysisSummary(extension.outputs, '<b>', '</b>').join(' ｜ ');
+  addChatExtension({ payload, extension, text });
+}
+
+function getAnalysisSummary(outputs, bold_start = '**', bold_end = '**') {
+  const { build, removed_snapshots } = outputs;
+  const results = [];
+  const total = build.attributes['total-snapshots'];
+  const un_reviewed = build.attributes['total-snapshots-unreviewed'];
+  const approved = total - un_reviewed;
+  if (approved) {
+    results.push(`${bold_start}✔ AP - ${approved}${bold_end}`);
+  } else {
+    results.push(`✔ AP - ${approved || 0}`);
+  }
+  if (un_reviewed) {
+    results.push(`${bold_start}🔎 UR - ${un_reviewed}${bold_end}`);
+  } else {
+    results.push(`🔎 UR - ${un_reviewed || 0}`);
+  }
+  if (removed_snapshots && removed_snapshots.length) {
+    results.push(`${bold_start}🗑 RM - ${removed_snapshots.length}${bold_end}`);
+  } else {
+    results.push(`🗑 RM - 0`);
+  }
+  return results;
+}
+
+const default_options = {
+  hook: HOOK.END,
+  condition: STATUS.PASS_OR_FAIL
+}
+
+const default_inputs = {
+  title: 'Percy Analysis',
+  url: URLS.PERCY,
+  title_link_to_build: true,
+  retries: 10,
+  build_id: '',
+  project_id: '',
+  project_name: '',
+  organization_uid: ''
+}
+
+const default_inputs_teams = {
+  separator: true
+}
+
+const default_inputs_slack = {
+  separator: false
+}
+
+const default_inputs_chat = {
+  separator: true
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+/***/ }),
+
+/***/ 191:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getPercentage } = __nccwpck_require__(7996);
+const { HOOK, STATUS, URLS } = __nccwpck_require__(7011);
+
+function getUrl(extension, result) {
+  const percentage = getPercentage(result.passed, result.total);
+  const chart = {
+    type: 'radialGauge',
+    data: {
+      datasets: [{
+        data: [percentage],
+        backgroundColor: 'green',
+      }]
+    },
+    options: {
+      trackColor: '#FF0000',
+      roundedCorners: false,
+      centerPercentage: 80,
+      centerArea: {
+        fontSize: 74,
+        text: `${percentage}%`,
+      },
+    }
+  }
+  return `${extension.inputs.url}/chart?c=${encodeURIComponent(JSON.stringify(chart))}`;
+}
+
+function attachForTeams({ extension, result, payload }) {
+  const main_column = {
+    "type": "Column",
+    "items": [payload.body[0], payload.body[1]],
+    "width": "stretch"
+  }
+  const image_column = {
+    "type": "Column",
+    "items": [
+      {
+        "type": "Image",
+        "url": getUrl(extension, result),
+        "altText": "overall-results-summary",
+        "size": "large"
+      }
+    ],
+    "width": "auto"
+  }
+  const column_set = {
+    "type": "ColumnSet",
+    "columns": [
+      main_column,
+      image_column
+    ]
+  }
+  payload.body = [column_set];
+}
+
+function attachForSlack({ extension, result, payload }) {
+  payload.blocks[0]["accessory"] = {
+    "type": "image",
+    "alt_text": "overall-results-summary",
+    "image_url": getUrl(extension, result)
+  }
+}
+
+function run(params) {
+  const { extension, target } = params;  
+  params.extension.inputs = extension.inputs || {};
+  params.extension.inputs["url"] = (extension.inputs.url && extension.inputs.url.trim()) || URLS.QUICK_CHART;
+  if (target.name === 'teams') {
+    attachForTeams(params);
+  } else if (target.name === 'slack') {
+    attachForSlack(params);
+  }
+}
+
+const default_options = {
+  hook: HOOK.AFTER_SUMMARY,
+  condition: STATUS.PASS_OR_FAIL
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+/***/ }),
+
+/***/ 431:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getLaunchDetails, getLastLaunchByName } = __nccwpck_require__(9217);
+const { addChatExtension, addSlackExtension, addTeamsExtension } = __nccwpck_require__(1213);
+const { HOOK, STATUS } = __nccwpck_require__(7011);
+
+function getReportPortalDefectsSummary(defects, bold_start = '**', bold_end = '**') {
+  const results = [];
+  if (defects.product_bug) {
+    results.push(`${bold_start}🔴 PB - ${defects.product_bug.total}${bold_end}`);
+  } else {
+    results.push(`🔴 PB - 0`);
+  }
+  if (defects.automation_bug) {
+    results.push(`${bold_start}🟡 AB - ${defects.automation_bug.total}${bold_end}`);
+  } else {
+    results.push(`🟡 AB - 0`);
+  }
+  if (defects.system_issue) {
+    results.push(`${bold_start}🔵 SI - ${defects.system_issue.total}${bold_end}`);
+  } else {
+    results.push(`🔵 SI - 0`);
+  }
+  if (defects.no_defect) {
+    results.push(`${bold_start}◯ ND - ${defects.no_defect.total}${bold_end}`);
+  } else {
+    results.push(`◯ ND - 0`);
+  }
+  if (defects.to_investigate) {
+    results.push(`${bold_start}🟠 TI - ${defects.to_investigate.total}${bold_end}`);
+  } else {
+    results.push(`🟠 TI - 0`);
+  }
+  return results;
+}
+
+async function _getLaunchDetails(options) {
+  if (!options.launch_id && options.launch_name) {
+    return getLastLaunchByName(options);
+  }
+  return getLaunchDetails(options);
+}
+
+async function initialize(extension) {
+  extension.inputs = Object.assign({}, default_inputs, extension.inputs);
+  extension.outputs.launch = await _getLaunchDetails(extension.inputs);
+  if (!extension.inputs.title_link && extension.inputs.title_link_to_launch) {
+    extension.inputs.title_link = `${extension.inputs.url}/ui/#${extension.inputs.project}/launches/all/${extension.outputs.launch.uuid}`;
+  }
+}
+
+async function run({ extension, payload, target }) {
+  await initialize(extension);
+  const { statistics } = extension.outputs.launch;
+  if (statistics && statistics.defects) {
+    if (target.name === 'teams') {
+      extension.inputs = Object.assign({}, default_inputs_teams, extension.inputs);
+      const analyses = getReportPortalDefectsSummary(statistics.defects);
+      addTeamsExtension({ payload, extension, text: analyses.join(' ｜ ') });
+    } else if (target.name === 'slack') {
+      extension.inputs = Object.assign({}, default_inputs_slack, extension.inputs);
+      const analyses = getReportPortalDefectsSummary(statistics.defects, '*', '*');
+      addSlackExtension({ payload, extension, text: analyses.join(' ｜ ') });
+    } else if (target.name === 'chat') {
+      extension.inputs = Object.assign({}, default_inputs_chat, extension.inputs);
+      const analyses = getReportPortalDefectsSummary(statistics.defects, '<b>', '</b>');
+      addChatExtension({ payload, extension, text: analyses.join(' ｜ ') });
+    }
+  }
+}
+
+const default_options = {
+  hook: HOOK.END,
+  condition: STATUS.FAIL
+}
+
+const default_inputs = {
+  title: 'Report Portal Analysis',
+  title_link_to_launch: true,
+}
+
+const default_inputs_teams = {
+  separator: true
+}
+
+const default_inputs_slack = {
+  separator: false
+}
+
+const default_inputs_chat = {
+  separator: true
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+/***/ }),
+
+/***/ 8589:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getSuiteHistory, getLastLaunchByName, getLaunchDetails } = __nccwpck_require__(9217);
+const { addChatExtension, addSlackExtension, addTeamsExtension } = __nccwpck_require__(1213);
+const { HOOK, STATUS } = __nccwpck_require__(7011);
+const logger = __nccwpck_require__(1180);
+
+async function getLaunchHistory(extension) {
+  const { inputs, outputs } = extension;
+  if (!inputs.launch_id && inputs.launch_name) {
+    const launch = await getLastLaunchByName(inputs);
+    outputs.launch = launch;
+    inputs.launch_id = launch.id;
+  }
+  if (typeof inputs.launch_id === 'string') {
+    const launch = await getLaunchDetails(inputs);
+    outputs.launch = launch;
+    inputs.launch_id = launch.id;
+  }
+  const response = await getSuiteHistory(inputs);
+  if (response.content.length > 0) {
+    outputs.history = response.content[0].resources;
+    return response.content[0].resources;
+  }
+  return [];
+}
+
+function getSymbols({ target, extension, launches }) {
+  const symbols = [];
+  for (let i = 0; i < launches.length; i++) {
+    const launch = launches[i];
+    const launch_url = `${extension.inputs.url}/ui/#${extension.inputs.project}/launches/all/${launch[extension.inputs.link_history_via]}`;
+    let current_symbol = '⚠️';
+    if (launch.status === 'PASSED') {
+      current_symbol = '✅'; 
+    } else if (launch.status === 'FAILED') {
+      current_symbol = '❌'; 
+    }
+    if (target.name === 'teams') {
+      symbols.push(`[${current_symbol}](${launch_url})`);
+    } else if (target.name === 'slack') {
+      symbols.push(`<${launch_url}|${current_symbol}>`);
+    } else if (target.name === 'chat') {
+      symbols.push(`<a href="${launch_url}">${current_symbol}</a>`);
+    } else {
+      symbols.push(current_symbol);
+    }
+  }
+  return symbols;
+}
+
+function setTitle(extension, symbols) {
+  if (extension.inputs.title === 'Last Runs') {
+    extension.inputs.title = `Last ${symbols.length} Runs`
+  }
+}
+
+async function run({ extension, target, payload }) {
+  try {
+    extension.inputs = Object.assign({}, default_inputs, extension.inputs);
+    const launches = await getLaunchHistory(extension);
+    const symbols = getSymbols({ target, extension, launches });
+    if (symbols.length > 0) {
+      setTitle(extension, symbols);
+      if (target.name === 'teams') {
+        extension.inputs = Object.assign({}, default_inputs_teams, extension.inputs);
+        addTeamsExtension({ payload, extension, text: symbols.join(' ') });
+      } else if (target.name === 'slack') {
+        extension.inputs = Object.assign({}, default_inputs_slack, extension.inputs);
+        addSlackExtension({ payload, extension, text: symbols.join(' ') });
+      } else if (target.name === 'chat') {
+        extension.inputs = Object.assign({}, default_inputs_chat, extension.inputs);
+        addChatExtension({ payload, extension, text: symbols.join(' ') });
+      }
+    }
+  } catch (error) {
+    logger.error(`Failed to get report portal history: ${error.message}`);
+    logger.debug(`Error: ${error}`);
+  }
+}
+
+const default_inputs = {
+  history_depth: 5,
+  title: 'Last Runs',
+  link_history_via: 'uuid'
+}
+
+const default_inputs_teams = {
+  separator: true
+}
+
+const default_inputs_chat = {
+  separator: true
+}
+
+const default_inputs_slack = {
+  separator: false
+}
+
+const default_options = {
+  hook: HOOK.END,
+  condition: STATUS.FAIL
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+
+/***/ }),
+
+/***/ 9014:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { BaseExtension } = __nccwpck_require__(1657);
+const { STATUS, HOOK } = __nccwpck_require__(7011);
+const logger = __nccwpck_require__(1180);
+
+class SmartAnalysisExtension extends BaseExtension {
+
+  constructor(target, extension, result, payload, root_payload) {
+    super(target, extension, result, payload, root_payload);
+    this.#setDefaultOptions();
+    this.#setDefaultInputs();
+    this.updateExtensionInputs();
+  }
+
+  run() {
+    this.#setText();
+    this.attach();
+  }
+
+  #setDefaultOptions() {
+    this.default_options.hook = HOOK.AFTER_SUMMARY,
+    this.default_options.condition = STATUS.PASS_OR_FAIL;
+  }
+
+  #setDefaultInputs() {
+    this.default_inputs.title = '';
+    this.default_inputs.title_link = '';
+  }
+
+  #setText() {
+    const data = this.extension.inputs.data;
+
+    if (!data) {
+      return;
+    }
+
+    /**
+     * @type {import('../beats/beats.types').IBeatExecutionMetric}
+     */
+    const execution_metrics = data.execution_metrics[0];
+
+    if (!execution_metrics) {
+      logger.warn('⚠️ No execution metrics found. Skipping.');
+      return;
+    }
+
+    const smart_analysis = [];
+    if (execution_metrics.newly_failed) {
+      smart_analysis.push(`⭕ Newly Failed: ${execution_metrics.newly_failed}`);
+    }
+    if (execution_metrics.always_failing) {
+      smart_analysis.push(`🔴 Always Failing: ${execution_metrics.always_failing}`);
+    }
+    if (execution_metrics.recurring_errors) {
+      smart_analysis.push(`🟠 Recurring Errors: ${execution_metrics.recurring_errors}`);
+    }
+    if (execution_metrics.flaky) {
+      smart_analysis.push(`🟡 Flaky: ${execution_metrics.flaky}`);
+    }
+    if (execution_metrics.recovered) {
+      smart_analysis.push(`🟢 Recovered: ${execution_metrics.recovered}`);
+    }
+
+    const texts = [];
+    const rows = [];
+    for (const item of smart_analysis) {
+      rows.push(item);
+      if (rows.length === 3) {
+        texts.push(rows.join('    '));
+        rows.length = 0;
+      }
+    }
+
+    if (rows.length > 0) {
+      texts.push(rows.join('    '));
+    }
+
+    this.text = this.mergeTexts(texts);
+  }
+
+}
+
+module.exports =  { SmartAnalysisExtension };
+
+/***/ }),
+
+/***/ 5664:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const os = __nccwpck_require__(857);
+const pkg = __nccwpck_require__(9841);
+
+const ENV = process.env;
+
+/**
+ * @returns {import('../extensions/extensions').ICIInfo}
+ */
+function getCIInformation() {
+  const ci_info = getBaseCIInfo();
+  const system_info = getSystemInfo();
+  return {
+    ...ci_info,
+    ...system_info
+  }
+}
+
+function getBaseCIInfo() {
+  if (ENV.GITHUB_ACTIONS) {
+    return getGitHubActionsInformation();
+  }
+  if (ENV.GITLAB_CI) {
+    return getGitLabInformation();
+  }
+  if (ENV.JENKINS_URL) {
+    return getJenkinsInformation();
+  }
+  if (ENV.SYSTEM_TEAMFOUNDATIONCOLLECTIONURI) {
+    return getAzureDevOpsInformation();
+  }
+  return getDefaultInformation();
+}
+
+function getGitHubActionsInformation() {
+  return {
+    ci: 'GITHUB_ACTIONS',
+    git: 'GITHUB',
+    repository_url: ENV.GITHUB_SERVER_URL + '/' + ENV.GITHUB_REPOSITORY,
+    repository_name: ENV.GITHUB_REPOSITORY,
+    repository_ref: ENV.GITHUB_REF,
+    repository_commit_sha: ENV.GITHUB_SHA,
+    build_url: ENV.GITHUB_SERVER_URL + '/' + ENV.GITHUB_REPOSITORY + '/actions/runs/' + ENV.GITHUB_RUN_ID,
+    build_number: ENV.GITHUB_RUN_NUMBER,
+    build_name: ENV.GITHUB_WORKFLOW,
+    build_reason: ENV.GITHUB_EVENT_NAME,
+    user: ENV.GITHUB_ACTOR,
+  }
+}
+
+function getAzureDevOpsInformation() {
+  return {
+    ci: 'AZURE_DEVOPS_PIPELINES',
+    git: 'AZURE_DEVOPS_REPOS',
+    repository_url: ENV.BUILD_REPOSITORY_URI,
+    repository_name: ENV.BUILD_REPOSITORY_NAME,
+    repository_ref: ENV.BUILD_SOURCEBRANCH,
+    repository_commit_sha: ENV.BUILD_SOURCEVERSION,
+    build_url: ENV.SYSTEM_TEAMFOUNDATIONCOLLECTIONURI + ENV.SYSTEM_TEAMPROJECT + '/_build/results?buildId=' + ENV.BUILD_BUILDID,
+    build_number: ENV.BUILD_BUILDNUMBER,
+    build_name: ENV.BUILD_DEFINITIONNAME,
+    build_reason: ENV.BUILD_REASON,
+    user: ENV.BUILD_REQUESTEDFOR
+  }
+}
+
+function getJenkinsInformation() {
+  return {
+    ci: 'JENKINS',
+    git: '',
+    repository_url: ENV.GIT_URL || ENV.GITHUB_URL || ENV.BITBUCKET_URL,
+    repository_name: ENV.JOB_NAME,
+    repository_ref: ENV.BRANCH || ENV.BRANCH_NAME,
+    repository_commit_sha: ENV.GIT_COMMIT || ENV.GIT_COMMIT_SHA || ENV.GITHUB_SHA || ENV.BITBUCKET_COMMIT,
+    build_url: ENV.BUILD_URL,
+    build_number: ENV.BUILD_NUMBER,
+    build_name: ENV.JOB_NAME,
+    build_reason: ENV.BUILD_CAUSE,
+    user: ENV.USER || ENV.USERNAME
+  }
+}
+
+function getGitLabInformation() {
+  return {
+    ci: 'GITLAB',
+    git: 'GITLAB',
+    repository_url: ENV.CI_PROJECT_URL,
+    repository_name: ENV.CI_PROJECT_NAME,
+    repository_ref: ENV.CI_MERGE_REQUEST_SOURCE_BRANCH_NAME || ENV.CI_COMMIT_REF_NAME,
+    repository_commit_sha:ENV.CI_MERGE_REQUEST_SOURCE_BRANCH_SHA || ENV.CI_COMMIT_SHA,
+    build_url: ENV.CI_JOB_URL,
+    build_number: ENV.CI_JOB_ID,
+    build_name: ENV.CI_JOB_NAME,
+    build_reason: ENV.CI_PIPELINE_SOURCE,
+    user: ENV.GITLAB_USER_LOGIN || ENV.CI_COMMIT_AUTHOR
+  }
+}
+
+function getDefaultInformation() {
+  return {
+    ci: ENV.TEST_BEATS_CI_NAME,
+    git: ENV.TEST_BEATS_CI_GIT,
+    repository_url: ENV.TEST_BEATS_CI_REPOSITORY_URL,
+    repository_name: ENV.TEST_BEATS_CI_REPOSITORY_NAME,
+    repository_ref: ENV.TEST_BEATS_CI_REPOSITORY_REF,
+    repository_commit_sha: ENV.TEST_BEATS_CI_REPOSITORY_COMMIT_SHA,
+    build_url: ENV.TEST_BEATS_CI_BUILD_URL,
+    build_number: ENV.TEST_BEATS_CI_BUILD_NUMBER,
+    build_name: ENV.TEST_BEATS_CI_BUILD_NAME,
+    build_reason: ENV.TEST_BEATS_CI_BUILD_REASON,
+    user: ENV.TEST_BEATS_CI_USER || os.userInfo().username
+  }
+}
+
+function getSystemInfo() {
+  function getRuntimeInfo() {
+    if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+      return { name: 'node', version: process.versions.node };
+    } else if (typeof Deno !== 'undefined') {
+      return { name: 'deno', version: Deno.version.deno };
+    } else if (typeof Bun !== 'undefined') {
+      return { name: 'bun', version: Bun.version };
+    } else {
+      return { name: 'unknown', version: 'unknown' };
+    }
+  }
+
+  const runtime = getRuntimeInfo();
+
+  return {
+    runtime: runtime.name,
+    runtime_version: runtime.version,
+    os: os.platform(),
+    os_version: os.release(),
+    testbeats_version: pkg.version
+  }
+}
+
+module.exports = {
+  getCIInformation
+}
+
+/***/ }),
+
+/***/ 7011:
+/***/ ((module) => {
+
+const STATUS = Object.freeze({
+  PASS: 'pass',
+  FAIL: 'fail',
+  PASS_OR_FAIL: 'passOrfail'
+});
+
+const HOOK = Object.freeze({
+  START: 'start',
+  AFTER_SUMMARY: 'after-summary',
+  END: 'end',
+});
+
+const TARGET = Object.freeze({
+  SLACK: 'slack',
+  TEAMS: 'teams',
+  CHAT: 'chat',
+  CUSTOM: 'custom',
+  DELAY: 'delay',
+  INFLUX: 'influx',
+});
+
+const EXTENSION = Object.freeze({
+  AI_FAILURE_SUMMARY: 'ai-failure-summary',
+  FAILURE_ANALYSIS: 'failure-analysis',
+  SMART_ANALYSIS: 'smart-analysis',
+  ERROR_CLUSTERS: 'error-clusters',
+  HYPERLINKS: 'hyperlinks',
+  MENTIONS: 'mentions',
+  REPORT_PORTAL_ANALYSIS: 'report-portal-analysis',
+  REPORT_PORTAL_HISTORY: 'report-portal-history',
+  QUICK_CHART_TEST_SUMMARY: 'quick-chart-test-summary',
+  PERCY_ANALYSIS: 'percy-analysis',
+  CUSTOM: 'custom',
+  METADATA: 'metadata',
+  CI_INFO: 'ci-info',
+});
+
+const URLS = Object.freeze({
+  PERCY: 'https://percy.io',
+  QUICK_CHART: 'https://quickchart.io'
+});
+
+const PROCESS_STATUS = Object.freeze({
+  RUNNING: 'RUNNING',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  SKIPPED: 'SKIPPED',
+});
+
+const MIN_NODE_VERSION = 14;
+
+module.exports = Object.freeze({
+  STATUS,
+  HOOK,
+  TARGET,
+  EXTENSION,
+  URLS,
+  PROCESS_STATUS,
+  MIN_NODE_VERSION
+});
+
+/***/ }),
+
+/***/ 1213:
+/***/ ((module) => {
+
+/**
+ * Add Slack Extension function.
+ *
+ * @param {object} param0 - the payload object
+ * @param {object} param0.payload - the payload object
+ * @param {import("..").IExtension} param0.extension - the extension to add
+ * @param {string} param0.text - the text to include
+ * @return {void}
+ */
+function addSlackExtension({ payload, extension, text }) {
+  if (extension.inputs.separator) {
+    payload.blocks.push({
+      "type": "divider"
+    });
+  }
+  let updated_text = text;
+  if (extension.inputs.title) {
+    const title = extension.inputs.title_link ? `<${extension.inputs.title_link}|${extension.inputs.title}>` : extension.inputs.title;
+    updated_text = `*${title}*\n\n${text}`;
+  }
+  if (extension.inputs.block_type === 'context') {
+    payload.blocks.push({
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "text": updated_text
+        }
+      ]
+    });
+  } else {
+    payload.blocks.push({
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": updated_text
+      }
+    });
+  }
+}
+
+/**
+ * Add Teams Extension function.
+ *
+ * @param {object} param0 - the payload object
+ * @param {object} param0.payload - the payload object
+ * @param {import("..").IExtension} param0.extension - the extension to add
+ * @param {string} param0.text - the text to include
+ * @return {void}
+ */
+function addTeamsExtension({ payload, extension, text }) {
+  if (extension.inputs.title) {
+    const title = extension.inputs.title_link ? `[${extension.inputs.title}](${extension.inputs.title_link})` : extension.inputs.title
+    payload.body.push({
+      "type": "TextBlock",
+      "text": title,
+      "isSubtle": true,
+      "weight": "bolder",
+      "separator": extension.inputs.separator,
+      "wrap": true
+    });
+    payload.body.push({
+      "type": "TextBlock",
+      "text": text,
+      "wrap": true
+    });
+  } else {
+    payload.body.push({
+      "type": "TextBlock",
+      "text": text,
+      "wrap": true,
+      "separator": extension.inputs.separator
+    });
+  }
+}
+
+/**
+ * Add Chat Extension function.
+ *
+ * @param {object} param0 - the payload object
+ * @param {object} param0.payload - the payload object
+ * @param {import("..").IExtension} param0.extension - the extension to add
+ * @param {string} param0.text - the text to include
+ * @return {void}
+ */
+function addChatExtension({ payload, extension, text }) {
+  let updated_text = text;
+  if (extension.inputs.title) {
+    const title = extension.inputs.title_link ? `<a href="${extension.inputs.title_link}">${extension.inputs.title}</a>` : extension.inputs.title;
+    updated_text = `<b>${title}</b><br><br>${text}`;
+  }
+  payload.sections.push({
+    "widgets": [
+      {
+        "textParagraph": {
+          "text": updated_text
+        }
+      }
+    ]
+  });
+}
+
+module.exports = {
+  addSlackExtension,
+  addTeamsExtension,
+  addChatExtension
+}
+
+/***/ }),
+
+/***/ 7996:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const pretty_ms = __nccwpck_require__(2439);
+
+const DATA_REF_PATTERN = /(\{[^\}]+\})/g;
+const ALLOWED_CONDITIONS = new Set(['pass', 'fail', 'passorfail']);
+const GENERIC_CONDITIONS = new Set(['always', 'never']);
+
+function getPercentage(x, y) {
+  if (y > 0) {
+    return Math.floor((x / y) * 100);
+  }
+  return 0;
+}
+
+function processText(raw) {
+  const dataRefMatches = raw.match(DATA_REF_PATTERN);
+  if (dataRefMatches) {
+    const values = [];
+    for (let i = 0; i < dataRefMatches.length; i++) {
+      const dataRefMatch = dataRefMatches[i];
+      const content = dataRefMatch.slice(1, -1);
+      if (process.env[content]) {
+        values.push(process.env[content]);
+      } else {
+        values.push(content);
+      }
+    }
+    for (let i = 0; i < dataRefMatches.length; i++) {
+      raw = raw.replace(dataRefMatches[i], values[i]);
+    }
+  }
+  return raw;
+}
+
+/**
+ * @returns {import('../index').PublishConfig }
+ */
+function processData(data) {
+  if (typeof data === 'string') {
+    return processText(data);
+  }
+  if (typeof data === 'object') {
+    for (const prop in data) {
+      data[prop] = processData(data[prop]);
+    }
+  }
+  return data;
+}
+
+/**
+ *
+ * @param {string} text
+ * @param {number} length
+ * @returns
+ */
+function truncate(text, length) {
+  if (text && text.length > length) {
+    return text.slice(0, length).trim() + "...";
+  } else {
+    return text;
+  }
+}
+
+function getPrettyDuration(ms, format) {
+  return pretty_ms(parseInt(ms), { [format]: true, secondsDecimalDigits: 0 })
+}
+
+function getTitleText({ result, target }) {
+  const title = target.inputs.title ? target.inputs.title : result.name;
+  if (target.inputs.title_suffix) {
+    return `${title} ${target.inputs.title_suffix}`;
+  }
+  return `${title}`;
+}
+
+function getResultText({ result }) {
+  const percentage = getPercentage(result.passed, result.total);
+  return `${result.passed} / ${result.total} Passed (${percentage}%)`;
+}
+
+/**
+ *
+ * @param {object} param0
+ * @param {string | Function} param0.condition
+ */
+async function checkCondition({ condition, result, target, extension }) {
+  if (typeof condition === 'function') {
+    return await condition({ target, result, extension });
+  } else {
+    const lower_condition = condition.toLowerCase();
+    if (ALLOWED_CONDITIONS.has(lower_condition)) {
+      return lower_condition.includes(result.status.toLowerCase());
+    } else if (GENERIC_CONDITIONS.has(lower_condition)) {
+      return lower_condition === 'always';
+    } else {
+      return eval(condition);
+    }
+  }
+}
+
+module.exports = {
+  getPercentage,
+  processData,
+  truncate,
+  getPrettyDuration,
+  getTitleText,
+  getResultText,
+  checkCondition,
+}
+
+/***/ }),
+
+/***/ 7151:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { checkCondition } = __nccwpck_require__(7996);
+
+function getMetaDataText(params) {
+  switch (params.target.name) {
+    case 'teams':
+      return getTeamsMetaDataText(params);
+    case 'slack':
+      return getSlackMetaDataText(params);
+    case 'chat':
+      return getChatMetaDataText(params);
+    default:
+      return '';
+  }
+}
+
+/**
+ * Asynchronously generates metadata text for slack.
+ *
+ * @param {object} param0 - the payload object
+ * @param {Object} param0.elements - The elements to generate metadata text from
+ * @param {import('..').ITarget} param0.target - The result object
+ * @param {import('..').IExtension} param0.extension - The result object
+ * @param {Object} param0.result - The result object
+ * @param {string} param0.default_condition - The default condition object
+ * @return {string} The generated metadata text
+ */
+async function getSlackMetaDataText({ elements, target, extension, result, default_condition }) {
+  const items = [];
+  for (const element of elements) {
+    if (await is_valid({ element, result, default_condition })) {
+      if (element.type === 'hyperlink') {
+        const url = await get_url({ url: element.value, target, result, extension });
+        if (element.label) {
+          items.push(`*${element.label}:* <${url}|${element.key}>`);
+        } else {
+          items.push(`<${url}|${element.key}>`);
+        }
+      } else if (element.key) {
+        items.push(`*${element.key}:* ${element.value}`);
+      } else {
+        items.push(element.value);
+      }
+    }
+  }
+  return items.join(' ｜ ');
+}
+
+/**
+ * Asynchronously generates metadata text for teams.
+ *
+ * @param {object} param0 - the payload object
+ * @param {Object} param0.elements - The elements to generate metadata text from
+ * @param {import('..').ITarget} param0.target - The result object
+ * @param {import('..').IExtension} param0.extension - The result object
+ * @param {Object} param0.result - The result object
+ * @param {string} param0.default_condition - The default condition object
+ * @return {string} The generated metadata text
+ */
+async function getTeamsMetaDataText({ elements, target, extension, result, default_condition }) {
+  const items = [];
+  for (const element of elements) {
+    if (await is_valid({ element, result, default_condition })) {
+      if (element.type === 'hyperlink') {
+        const url = await get_url({ url: element.value, target, result, extension });
+        if (element.label) {
+          items.push(`**${element.label}:** [${element.key}](${url})`);
+        } else {
+          items.push(`[${element.key}](${url})`);
+        }
+      } else if (element.key) {
+        items.push(`**${element.key}:** ${element.value}`);
+      } else {
+        items.push(element.value);
+      }
+    }
+  }
+  return items.join(' ｜ ');
+}
+
+/**
+ * Asynchronously generates metadata text for chat.
+ *
+ * @param {object} param0 - the payload object
+ * @param {Object} param0.elements - The elements to generate metadata text from
+ * @param {import('..').ITarget} param0.target - The result object
+ * @param {import('..').IExtension} param0.extension - The result object
+ * @param {Object} param0.result - The result object
+ * @param {string} param0.default_condition - The default condition object
+ * @return {string} The generated metadata text
+ */
+async function getChatMetaDataText({ elements, target, extension, result, default_condition }) {
+  const items = [];
+  for (const element of elements) {
+    if (await is_valid({ element, result, default_condition })) {
+      if (element.type === 'hyperlink') {
+        const url = await get_url({ url: element.value, target, result, extension });
+        if (element.label) {
+          items.push(`<b>${element.label}:</b> <a href="${url}">${element.key}</a>`);
+        } else {
+          items.push(`<a href="${url}">${element.key}</a>`);
+        }
+      } else if (element.key) {
+        items.push(`<b>${element.key}:</b> ${element.value}`);
+      } else {
+        items.push(element.value);
+      }
+    }
+  }
+  return items.join(' ｜ ');
+}
+
+function is_valid({ element, result, default_condition }) {
+  const condition = element.condition || default_condition;
+  return checkCondition({ condition, result });
+}
+
+function get_url({ url, target, extension, result}) {
+  if (typeof url === 'function') {
+    return url({target, extension, result});
+  }
+  return url;
+}
+
+module.exports = {
+  getMetaDataText,
+  getSlackMetaDataText,
+  getTeamsMetaDataText,
+  getChatMetaDataText
+}
+
+/***/ }),
+
+/***/ 4457:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const request = __nccwpck_require__(4873);
+
+/**
+ * @param {import('../index').PercyAnalysisInputs} inputs 
+ */
+async function getProjectByName(inputs) {
+  return request.get({
+    url: `${inputs.url}/api/v1/projects`,
+    headers: {
+      'Authorization': `Token ${inputs.token}`
+    },
+    form: {
+      'project_slug': inputs.project_name
+    }
+  });
+}
+
+/**
+ * @param {import('../index').PercyAnalysisInputs} inputs 
+ */
+async function getLastBuild(inputs) {
+  return request.get({
+    url: `${inputs.url}/api/v1/builds?project_id=${inputs.project_id}&page[limit]=1`,
+    headers: {
+      'Authorization': `Token ${inputs.token}`
+    }
+  });
+}
+
+/**
+ * @param {import('../index').PercyAnalysisInputs} inputs 
+ */
+ async function getBuild(inputs) {
+  return request.get({
+    url: `${inputs.url}/api/v1/builds/${inputs.build_id}`,
+    headers: {
+      'Authorization': `Token ${inputs.token}`
+    }
+  });
+}
+
+/**
+ * @param {import('../index').PercyAnalysisInputs} inputs 
+ */
+ async function getRemovedSnapshots(inputs) {
+  return request.get({
+    url: `${inputs.url}/api/v1/builds/${inputs.build_id}/removed-snapshots`,
+    headers: {
+      'Authorization': `Token ${inputs.token}`
+    }
+  });
+}
+
+
+module.exports = {
+  getProjectByName,
+  getLastBuild,
+  getBuild,
+  getRemovedSnapshots
+}
+
+/***/ }),
+
+/***/ 1940:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const Metric = __nccwpck_require__(8241);
+const { checkCondition } = __nccwpck_require__(7996);
+const pretty_ms = __nccwpck_require__(2439);
+
+/**
+ * @param {object} param0 
+ * @param {Metric[]} param0.metrics 
+ * @param {object} param0.result
+ * @param {object} param0.target  
+ */
+async function getValidMetrics({ metrics, result, target }) {
+  if (target.inputs.metrics && target.inputs.metrics.length > 0) {
+    const valid_metrics = [];
+    for (let i = 0; i < metrics.length; i++) {
+      const metric = metrics[i];
+      for (let j = 0; j < target.inputs.metrics.length; j++) {
+        const metric_config = target.inputs.metrics[j];
+        if (metric.name === metric_config.name) {
+          const include = await checkCondition({ condition: metric_config.condition || 'always', result, target });
+          if (include) valid_metrics.push(metric);
+        }
+      }
+    }
+    return valid_metrics;
+  }
+  return metrics;
+}
+
+/**
+ * @param {Metric} metric 
+ * @param {string[]} fields 
+ */
+function getCounterMetricFieldValue(metric, fields) {
+  let value = '';
+  if (fields.includes('sum')) {
+    const sum_failure = metric.failures.find(_failure => _failure.field === 'sum');
+    if (sum_failure) {
+      const emoji = getEmoji(sum_failure.difference);
+      value = `${emoji} ${metric['sum']} (${getDifferenceSymbol(sum_failure.difference)}${sum_failure.difference}) `
+    } else {
+      value = `${metric['sum']} `;
+    }
+  }
+  if (fields.includes('rate')) {
+    let metric_unit = metric.unit.startsWith('/') ? metric.unit : ` ${metric.unit}`;
+    const rate_failure = metric.failures.find(_failure => _failure.field === 'rate');
+    if (rate_failure) {
+      const emoji = getEmoji(rate_failure.difference);
+      value += `${emoji} ${metric['rate']}${metric_unit} (${getDifferenceSymbol(rate_failure.difference)}${rate_failure.difference})`
+    } else {
+      value += `${metric['rate']}${metric_unit}`;
+    }
+  }
+  return value;
+}
+
+/**
+ * @param {Metric} metric 
+ */
+function getTrendMetricFieldValue(metric, field) {
+  const failure = metric.failures.find(_failure => _failure.field === field);
+  if (failure) {
+    const emoji = getEmoji(failure.difference);
+    return `${emoji} ${field}=${pretty_ms(metric[field])} (${getDifferenceSymbol(failure.difference)}${pretty_ms(failure.difference)})`
+  }
+  return `${field}=${pretty_ms(metric[field])}`;
+}
+
+/**
+ * @param {Metric} metric 
+ */
+function getRateMetricFieldValue(metric) {
+  const failure = metric.failures.find(_failure => _failure.field === 'rate');
+  if (failure) {
+    const emoji = getEmoji(failure.difference);
+    return `${emoji} ${metric['rate']} ${metric.unit} (${getDifferenceSymbol(failure.difference)}${failure.difference})`;
+  }
+  return `${metric['rate']} ${metric.unit}`;
+}
+
+function getEmoji(value) {
+  return value > 0 ? '🔺' : '🔻';
+}
+
+function getDifferenceSymbol(value) {
+  return value > 0 ? `+` : '';
+}
+
+/**
+ * 
+ * @param {object} param0 
+ * @param {Metric} param0.metric 
+ */
+function getDisplayFields({ metric, target }) {
+  let fields = [];
+  if (target.inputs.metrics) {
+    const metric_config = target.inputs.metrics.find(_metric => _metric.name === metric.name);
+    if (metric_config) {
+      fields = metric_config.fields;
+    }
+  }
+  if (fields && fields.length > 0) {
+    return fields;
+  } else {
+    switch (metric.type) {
+      case 'COUNTER':
+        return ['sum', 'rate'];
+      case 'RATE':
+        return ['rate'];
+      case 'TREND':
+        return ['avg', 'min', 'med', 'max', 'p90', 'p95', 'p99'];
+      default:
+        return ['sum', 'min', 'max'];
+    }
+  }
+}
+
+/**
+ * @param {object} param0 
+ * @param {Metric} param0.metric 
+ */
+function getMetricValuesText({ metric, target }) {
+  const fields = getDisplayFields({ metric, target });
+  const values = [];
+  if (metric.type === 'COUNTER') {
+    values.push(getCounterMetricFieldValue(metric, fields));
+  } else if (metric.type === 'TREND') {
+    for (let i = 0; i < fields.length; i++) {
+      const field_metric = fields[i];
+      values.push(getTrendMetricFieldValue(metric, field_metric));
+    }
+  } else if (metric.type === 'RATE') {
+    values.push(getRateMetricFieldValue(metric));
+  }
+  return values.join(' ｜ ');
+}
+
+module.exports = {
+  getValidMetrics,
+  getMetricValuesText
+}
+
+/***/ }),
+
+/***/ 9217:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const request = __nccwpck_require__(4873);
+
+async function getLaunchDetails(options) {
+  return request.get({
+    url: `${options.url}/api/v1/${options.project}/launch/${options.launch_id}`,
+    headers: {
+      'Authorization': `Bearer ${options.api_key}`
+    }
+  });
+}
+
+async function getLaunchesByName(options) {
+  return request.get({
+    url: `${options.url}/api/v1/${options.project}/launch?filter.eq.name=${options.launch_name}&page.size=1&page.sort=startTime%2Cdesc`,
+    headers: {
+      'Authorization': `Bearer ${options.api_key}`
+    }
+  });
+}
+
+async function getLastLaunchByName(options) {
+  const response = await getLaunchesByName(options);
+  if (response.content && response.content.length > 0) {
+    return response.content[0];
+  }
+  return null;
+}
+
+async function getSuiteHistory(options) {
+  return request.get({
+    url: `${options.url}/api/v1/${options.project}/item/history`,
+    qs: {
+      historyDepth: options.history_depth,
+      'filter.eq.launchId': options.launch_id,
+      'filter.!ex.parentId': 'true'
+    },
+    headers: {
+      'Authorization': `Bearer ${options.api_key}`
+    }
+  });
+}
+
+module.exports = {
+  getLaunchDetails,
+  getLastLaunchByName,
+  getSuiteHistory
+}
+
+/***/ }),
+
+/***/ 2764:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { PublishCommand } = __nccwpck_require__(3843);
+
+function publish(options) {
+  const publish_command = new PublishCommand(options);
+  return publish_command.publish();
+}
+
+function defineConfig(config) {
+  return config
+}
+
+module.exports = {
+  publish,
+  defineConfig
+}
+
+/***/ }),
+
+/***/ 921:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { getPercentage, getPrettyDuration } = __nccwpck_require__(7996)
+
+class BasePlatform {
+
+  /**
+   * @param {string|number} text
+   */
+  bold(text) {
+    throw new Error('Not Implemented');
+  }
+
+  break() {
+    throw new Error('Not Implemented');
+  }
+
+  /**
+   *
+   * @param {import('..').ITarget} target
+   * @param {import('test-results-parser').ITestSuite} suite
+   */
+  getSuiteSummaryText(target, suite) {
+    const suite_title = this.getSuiteTitle(suite);
+    const suite_results_text = this.#getSuiteResultsText(suite);
+    const duration_text = this.#getSuiteDurationText(target, suite);
+
+    const texts = [
+      this.bold(suite_title),
+      this.break(),
+      this.break(),
+      suite_results_text,
+      this.break(),
+      duration_text,
+    ];
+
+    const metadata_text = this.getSuiteMetaDataText(suite);
+
+    if (metadata_text) {
+      texts.push(this.break());
+      texts.push(this.break());
+      texts.push(metadata_text);
+    }
+
+    return texts.join('');
+  }
+
+  /**
+   *
+   * @param {import('test-results-parser').ITestSuite} suite
+   * @returns {string}
+   */
+  getSuiteTitle(suite) {
+    const emoji = suite.status === 'PASS' ? '✅' : suite.total === suite.skipped ? '⏭️' : '❌';
+    return `${emoji} ${suite.name}`;
+  }
+
+  /**
+   *
+   * @param {import('test-results-parser').ITestSuite} suite
+   * @returns {string}
+   */
+  #getSuiteResultsText(suite) {
+    const suite_results = this.getSuiteResults(suite);
+    return `${this.bold('Results')}: ${suite_results}`;
+  }
+
+  /**
+   *
+   * @param {import('test-results-parser').ITestSuite} suite
+   * @returns {string}
+   */
+  getSuiteResults(suite) {
+    return `${suite.passed} / ${suite.total} Passed (${getPercentage(suite.passed, suite.total)}%)`;
+  }
+
+  /**
+   *
+   * @param {import('..').ITarget} target
+   * @param {import('test-results-parser').ITestSuite} suite
+   */
+  #getSuiteDurationText(target, suite) {
+    const duration = this.getSuiteDuration(target, suite);
+    return `${this.bold('Duration')}: ${duration}`
+  }
+
+  /**
+   *
+   * @param {import('..').ITarget} target
+   * @param {import('test-results-parser').ITestSuite} suite
+   */
+  getSuiteDuration(target, suite) {
+    return getPrettyDuration(suite.duration, target.inputs.duration);
+  }
+
+  /**
+   *
+   * @param {import('test-results-parser').ITestSuite} suite
+   * @returns {string}
+   */
+  getSuiteMetaDataText(suite) {
+    if (!suite || !suite.metadata) {
+      return;
+    }
+
+    const texts = [];
+
+    // webdriver io
+    if (suite.metadata.device && typeof suite.metadata.device === 'string') {
+      texts.push(`${suite.metadata.device}`);
+    }
+
+    if (suite.metadata.platform && suite.metadata.platform.name && suite.metadata.platform.version) {
+      texts.push(`${suite.metadata.platform.name} ${suite.metadata.platform.version}`);
+    }
+
+    if (suite.metadata.browser && suite.metadata.browser.name && suite.metadata.browser.version) {
+      texts.push(`${suite.metadata.browser.name} ${suite.metadata.browser.version}`);
+    }
+
+    // playwright
+    if (suite.metadata.hostname && typeof suite.metadata.hostname === 'string') {
+      texts.push(`${suite.metadata.hostname}`);
+    }
+
+    return texts.join(' • ');
+  }
+}
+
+module.exports = { BasePlatform }
+
+/***/ }),
+
+/***/ 2192:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { BasePlatform } = __nccwpck_require__(921);
+
+class ChatPlatform extends BasePlatform {
+
+  /**
+   * @param {string|number} text
+   */
+  bold(text) {
+    return `<b>${text}</b>`;
+  }
+
+  break() {
+    return '<br>';
+  }
+
+}
+
+module.exports = { ChatPlatform }
+
+/***/ }),
+
+/***/ 7051:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { TARGET } = __nccwpck_require__(7011);
+const { SlackPlatform } = __nccwpck_require__(3946);
+const { TeamsPlatform } = __nccwpck_require__(5232);
+const { ChatPlatform } = __nccwpck_require__(2192);
+
+/**
+ *
+ * @param {string} name
+ */
+function getPlatform(name) {
+  switch (name) {
+    case TARGET.SLACK:
+      return new SlackPlatform();
+    case TARGET.TEAMS:
+      return new TeamsPlatform();
+    case TARGET.CHAT:
+      return new ChatPlatform();
+    default:
+      throw new Error('Invalid Platform');
+  }
+}
+
+module.exports = {
+  getPlatform
+}
+
+/***/ }),
+
+/***/ 3946:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { BasePlatform } = __nccwpck_require__(921);
+
+class SlackPlatform extends BasePlatform {
+
+  /**
+   * @param {string|number} text
+   */
+  bold(text) {
+    return `*${text}*`;
+  }
+
+  break() {
+    return '\n';
+  }
+}
+
+module.exports = { SlackPlatform }
+
+/***/ }),
+
+/***/ 5232:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { BasePlatform } = __nccwpck_require__(921);
+
+class TeamsPlatform extends BasePlatform {
+  /**
+   * @param {string|number} text
+   */
+  bold(text) {
+    return `**${text}**`;
+  }
+
+  break() {
+    return '\n\n';
+  }
+}
+
+module.exports = { TeamsPlatform }
+
+/***/ }),
+
+/***/ 3495:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const request = __nccwpck_require__(4873);
+const { getTitleText, getResultText, truncate, getPrettyDuration } = __nccwpck_require__(7996);
+const extension_manager = __nccwpck_require__(9171);
+const { HOOK, STATUS, TARGET } = __nccwpck_require__(7011);
+const PerformanceTestResult = __nccwpck_require__(9818);
+const { getValidMetrics, getMetricValuesText } = __nccwpck_require__(1940);
+const logger = __nccwpck_require__(1180);
+const { getPlatform } = __nccwpck_require__(7051);
+
+async function run({ result, target }) {
+  setTargetInputs(target);
+  const root_payload = getRootPayload();
+  const payload = root_payload.cards[0];
+  if (result instanceof PerformanceTestResult) {
+    await setPerformancePayload({ result, target, payload, root_payload });
+  } else {
+    await setFunctionalPayload({ result, target, payload, root_payload });
+  }
+  logger.info(`🔔 Publishing results to Chat...`);
+  return request.post({
+    url: target.inputs.url,
+    body: root_payload
+  });
+}
+
+async function setFunctionalPayload({ result, target, payload, root_payload }) {
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.START });
+  setMainBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.AFTER_SUMMARY });
+  setSuiteBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.END });
+}
+
+function setTargetInputs(target) {
+  target.inputs = Object.assign({}, default_inputs, target.inputs);
+  if (target.inputs.publish === 'test-summary-slim') {
+    target.inputs.include_suites = false;
+  }
+  if (target.inputs.publish === 'failure-details') {
+    target.inputs.include_failure_details = true;
+  }
+}
+
+function getRootPayload() {
+  return {
+    "cards": [
+      {
+        "sections": []
+      }
+    ]
+  };
+}
+
+function setMainBlock({ result, target, payload }) {
+  const title_text_with_emoji = getTitleTextWithEmoji({ result, target });
+  const result_text = getResultText({ result });
+  const duration_text = getPrettyDuration(result.duration, target.inputs.duration);
+
+  const text = `<b>${title_text_with_emoji}</b><br><br><b>Results</b>: ${result_text}<br><b>Duration</b>: ${duration_text}`;
+  payload.sections.push({
+    "widgets": [
+      {
+        "textParagraph": {
+          text
+        }
+      }
+    ]
+  });
+}
+
+function setSuiteBlock({ result, target, payload }) {
+  let suite_attachments_length = 0;
+  if (target.inputs.include_suites) {
+    let texts = [];
+    for (let i = 0; i < result.suites.length && suite_attachments_length < target.inputs.max_suites; i++) {
+      const suite = result.suites[i];
+      if (target.inputs.only_failures && suite.status !== 'FAIL') {
+        continue;
+      }
+      // if suites length eq to 1 then main block will include suite summary
+      if (result.suites.length > 1) {
+        texts.push(getSuiteSummary({ target, suite }));
+        suite_attachments_length += 1;
+      }
+      if (target.inputs.include_failure_details) {
+        texts.push(getFailureDetails(suite));
+      }
+    }
+    if (texts.length > 0) {
+      payload.sections.push({
+        "widgets": [
+          {
+            "textParagraph": {
+              "text": texts.join("<br><br>")
+            }
+          }
+        ]
+      });
+    }
+  }
+}
+
+function getSuiteSummary({ target, suite }) {
+  const platform = getPlatform(TARGET.CHAT);
+  const text = platform.getSuiteSummaryText(target, suite);
+  return text;
+}
+
+function getFailureDetails(suite) {
+  let text = '';
+  const cases = suite.cases;
+  for (let i = 0; i < cases.length; i++) {
+    const test_case = cases[i];
+    if (test_case.status === 'FAIL') {
+      text += `<b>Test</b>: ${test_case.name}<br><b>Error</b>: ${truncate(test_case.failure ?? 'N/A', 150)}<br><br>`;
+    }
+  }
+  return text;
+}
+
+function getTitleTextWithEmoji({ result, target }) {
+  const emoji = result.status === 'PASS' ? '✅' : '❌';
+  const title_text = getTitleText({ result, target });
+
+  let title_text_with_emoji = '';
+  if (target.inputs.include_suites === false) {
+    title_text_with_emoji = `${emoji} ${title_text}`;
+  } else if (result.suites && result.suites.length > 1 || result.transactions && result.transactions.length > 1) {
+    title_text_with_emoji = title_text;
+  } else {
+    title_text_with_emoji = `${emoji} ${title_text}`;
+  }
+  if (target.inputs.title_link) {
+    title_text_with_emoji = `<a href="${target.inputs.title_link}">${title_text_with_emoji}</a>`;
+  }
+  return title_text_with_emoji;
+}
+
+async function setPerformancePayload({ result, target, payload, root_payload }) {
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.START });
+  await setPerformanceMainBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.AFTER_SUMMARY });
+  await setTransactionBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.END });
+}
+
+/**
+ *
+ * @param {object} param0
+ * @param {PerformanceTestResult} param0.result
+ */
+async function setPerformanceMainBlock({ result, target, payload }) {
+  const title_text_with_emoji = getTitleTextWithEmoji({ result, target });
+  const result_text = getResultText({ result });
+  let text = `<b>${title_text_with_emoji}</b><br><br><b>Results</b>: ${result_text}<br>`;
+  const valid_metrics = await getValidMetrics({ metrics: result.metrics, target, result });
+  for (let i = 0; i < valid_metrics.length; i++) {
+    const metric = valid_metrics[i];
+    text += `<br><b>${metric.name}</b>: ${getMetricValuesText({ metric, target, result })}`;
+  }
+  payload.sections.push({
+    "widgets": [
+      {
+        "textParagraph": {
+          text
+        }
+      }
+    ]
+  });
+}
+
+/**
+ *
+ * @param {object} param0
+ * @param {PerformanceTestResult} param0.result
+ */
+async function setTransactionBlock({ result, target, payload }) {
+  if (target.inputs.include_suites) {
+    let texts = [];
+    for (let i = 0; i < result.transactions.length; i++) {
+      const transaction = result.transactions[i];
+      if (target.inputs.only_failures && transaction.status !== 'FAIL') {
+        continue;
+      }
+      // if transactions length eq to 1 then main block will include suite summary
+      if (result.transactions.length > 1) {
+        texts.push(await getTransactionSummary({ target, transaction,  }));
+      }
+    }
+    if (texts.length > 0) {
+      payload.sections.push({
+        "widgets": [
+          {
+            "textParagraph": {
+              "text": texts.join("<br><br>")
+            }
+          }
+        ]
+      });
+    }
+  }
+}
+
+async function getTransactionSummary({ target, transaction }) {
+  const emoji = transaction.status === 'PASS' ? '✅' : '❌';
+  const suite_title = `${emoji} ${transaction.name}`;
+  let text = `<b>${suite_title}</b><br>`;
+  const valid_metrics = await getValidMetrics({ metrics: transaction.metrics, target, result: transaction });
+  for (let i = 0; i < valid_metrics.length; i++) {
+    const metric = valid_metrics[i];
+    text += `<br><b>${metric.name}</b>: ${getMetricValuesText({ metric, target })}`;
+  }
+  return text;
+}
+
+
+const default_options = {
+  condition: STATUS.PASS_OR_FAIL
+};
+
+const default_inputs = {
+  publish: 'test-summary',
+  include_suites: true,
+  max_suites: 10,
+  only_failures: true,
+  include_failure_details: false,
+  duration: '',
+  metrics: [
+    {
+      "name": "Samples",
+    },
+    {
+      "name": "Duration",
+      "condition": "always",
+      "fields": ["avg", "p95"]
+    }
+  ]
+};
+
+async function handleErrors({ target, errors }) {
+  let title = 'Error: Reporting Test Results';
+  title = target.inputs.title ? title + ' - ' + target.inputs.title : title;
+
+  const root_payload = getRootPayload();
+  const payload = root_payload.cards[0];
+
+  payload.sections.push({
+    "widgets": [
+      {
+        "textParagraph": {
+          text: `<b>${title}</b><br><br><b>Errors</b>: <br>${errors.join('<br>')}`
+        }
+      }
+    ]
+  });
+
+  return request.post({
+    url: target.inputs.url,
+    body: root_payload
+  });
+}
+
+module.exports = {
+  run,
+  handleErrors,
+  default_options
+}
+
+/***/ }),
+
+/***/ 5238:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const path = __nccwpck_require__(6928);
+const { STATUS } = __nccwpck_require__(7011);
+
+/**
+ *
+ * @param {object} param0
+ * @param {import('../index').ITarget} param0.target
+ */
+async function run({result, target}) {
+  if (typeof target.inputs.load === 'string') {
+    const cwd = process.cwd();
+    const target_runner = require(path.join(cwd, target.inputs.load));
+    await target_runner.run({ target, result });
+  } else if (typeof target.inputs.load === 'function') {
+    await target.inputs.load({ target, result });
+  } else {
+    throw `Invalid 'load' input in custom target - ${target.inputs.load}`;
+  }
+}
+
+const default_options = {
+  condition: STATUS.PASS_OR_FAIL
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+/***/ }),
+
+/***/ 9514:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { STATUS } = __nccwpck_require__(7011);
+
+async function run({ target }) {
+  target.inputs = Object.assign({}, default_inputs, target.inputs);
+  await new Promise(resolve => setTimeout(resolve, target.inputs.seconds * 1000));
+}
+
+const default_options = {
+  condition: STATUS.PASS_OR_FAIL
+}
+
+const default_inputs = {
+  seconds: 5
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+/***/ }),
+
+/***/ 53:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const teams = __nccwpck_require__(4547);
+const slack = __nccwpck_require__(1457);
+const chat = __nccwpck_require__(3495);
+const custom = __nccwpck_require__(5238);
+const delay = __nccwpck_require__(9514);
+const influx = __nccwpck_require__(7089);
+const { TARGET } = __nccwpck_require__(7011);
+const { checkCondition } = __nccwpck_require__(7996);
+
+function getTargetRunner(target) {
+  switch (target.name) {
+    case TARGET.TEAMS:
+      return teams;
+    case TARGET.SLACK:
+      return slack;
+    case TARGET.CHAT:
+      return chat;
+    case TARGET.CUSTOM:
+      return custom;
+    case TARGET.DELAY:
+      return delay;
+    case TARGET.INFLUX:
+      return influx;
+    default:
+      return require(target.name);
+  }
+}
+
+async function run(target, result) {
+  const target_runner = getTargetRunner(target);
+  const target_options = Object.assign({}, target_runner.default_options, target);
+  if (await checkCondition({ condition: target_options.condition, result, target })) {
+    await target_runner.run({result, target});
+  }
+}
+
+async function handleErrors({ target, errors }) {
+  const target_runner = getTargetRunner(target);
+  if (target_runner.handleErrors) {
+    await target_runner.handleErrors({ target, errors });
+  }
+}
+
+module.exports = {
+  run,
+  handleErrors
+}
+
+/***/ }),
+
+/***/ 7089:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const influx = __nccwpck_require__(1308);
+const Metric = __nccwpck_require__(8241);
+const PerformanceTestResult = __nccwpck_require__(9818);
+const Transaction = __nccwpck_require__(1665);
+const TestCase = __nccwpck_require__(1819);
+const TestResult = __nccwpck_require__(2658);
+const TestSuite = __nccwpck_require__(9275);
+
+
+const { STATUS } = __nccwpck_require__(7011);
+
+/**
+ *
+ * @param {object} param0
+ * @param {PerformanceTestResult | TestResult} param0.result
+ * @param {import('..').ITarget} param0.target
+ */
+async function run({ result, target }) {
+  target.inputs = Object.assign({}, default_inputs, target.inputs);
+  const metrics = getMetrics({ result, target });
+  await influx.write(
+    {
+      url: target.inputs.url,
+      version: target.inputs.version,
+      db: target.inputs.db,
+      username: target.inputs.username,
+      password: target.inputs.password,
+      org: target.inputs.org,
+      bucket: target.inputs.bucket,
+      token: target.inputs.token,
+    },
+    metrics
+  );
+}
+
+/**
+ *
+ * @param {object} param0
+ * @param {PerformanceTestResult | TestResult} param0.result
+ * @param {import('..').ITarget} param0.target
+ */
+function getMetrics({ result, target }) {
+  const influx_metrics = [];
+  if (result instanceof PerformanceTestResult) {
+    influx_metrics.push(getPerfRunInfluxMetric({ result, target }));
+
+    for (const transaction of result.transactions) {
+      influx_metrics.push(getTransactionInfluxMetric(transaction, target));
+    }
+  } else if (result instanceof TestResult) {
+    influx_metrics.push(getTestInfluxMetric({ result, target }, target.inputs.measurement_test_run));
+    for (const suite of result.suites) {
+      influx_metrics.push(getTestInfluxMetric({ result: suite, target }, target.inputs.measurement_test_suite));
+      for (const test_case of suite.cases) {
+        influx_metrics.push(getTestCaseInfluxMetric({ result: test_case, target }));
+      }
+    }
+  }
+  return influx_metrics;
+}
+
+/**
+ * @param {object} param0
+ * @param {PerformanceTestResult} param0.result
+ * @param {import('..').ITarget} param0.target
+ * @returns
+ */
+function getPerfRunInfluxMetric({ result, target }) {
+  const tags = Object.assign({}, target.inputs.tags);
+  tags.Name = result.name;
+  tags.Status = result.status;
+
+  const fields = Object.assign({}, target.inputs.fields);
+  fields.status = result.status === 'PASS' ? 0 : 1;
+  fields.transactions = result.transactions.length;
+  fields.transactions_passed = result.transactions.filter(_transaction => _transaction.status === "PASS").length;
+  fields.transactions_failed = result.transactions.filter(_transaction => _transaction.status === "FAIL").length;
+
+  for (const metric of result.metrics) {
+    setPerfInfluxMetricFields(metric, fields);
+  }
+
+  return {
+    measurement: target.inputs.measurement_perf_run,
+    tags,
+    fields
+  }
+}
+
+/**
+ *
+ * @param {Metric} metric
+ */
+function setPerfInfluxMetricFields(metric, fields) {
+  let name = metric.name;
+  name = name.toLowerCase();
+  name = name.replace(' ', '_');
+  if (metric.type === "COUNTER" || metric.type === "RATE") {
+    fields[`${name}_sum`] = metric.sum;
+    fields[`${name}_rate`] = metric.rate;
+  } else if (metric.type === "TREND") {
+    fields[`${name}_avg`] = metric.avg;
+    fields[`${name}_med`] = metric.med;
+    fields[`${name}_max`] = metric.max;
+    fields[`${name}_min`] = metric.min;
+    fields[`${name}_p90`] = metric.p90;
+    fields[`${name}_p95`] = metric.p95;
+    fields[`${name}_p99`] = metric.p99;
+  }
+}
+
+/**
+ *
+ * @param {Transaction} transaction
+ */
+function getTransactionInfluxMetric(transaction, target) {
+  const tags = Object.assign({}, target.inputs.tags);
+  tags.Name = transaction.name;
+  tags.Status = transaction.status;
+
+  const fields = Object.assign({}, target.inputs.fields);
+  fields.status = transaction.status === 'PASS' ? 0 : 1;
+
+  for (const metric of transaction.metrics) {
+    setPerfInfluxMetricFields(metric, fields);
+  }
+
+  return {
+    measurement: target.inputs.measurement_perf_transaction,
+    tags,
+    fields
+  }
+}
+
+/**
+ * @param {object} param0
+ * @param {TestResult | TestSuite} param0.result
+ * @param {import('..').ITarget} param0.target
+ * @returns
+ */
+function getTestInfluxMetric({ result, target }, measurement) {
+  const tags = Object.assign({}, target.inputs.tags);
+  tags.Name = result.name;
+  tags.Status = result.status;
+
+  const fields = Object.assign({}, target.inputs.fields);
+  fields.status = result.status === 'PASS' ? 0 : 1;
+  fields.total = result.total;
+  fields.passed = result.passed;
+  fields.failed = result.failed;
+  fields.duration = result.duration;
+
+  return {
+    measurement,
+    tags,
+    fields
+  }
+}
+
+/**
+ * @param {object} param0
+ * @param {TestCase} param0.result
+ * @param {import('..').ITarget} param0.target
+ * @returns
+ */
+function getTestCaseInfluxMetric({ result, target }) {
+  const tags = Object.assign({}, target.inputs.tags);
+  tags.Name = result.name;
+  tags.Status = result.status;
+
+  const fields = Object.assign({}, target.inputs.fields);
+  fields.status = result.status === 'PASS' ? 0 : 1;
+  fields.duration = result.duration;
+
+  return {
+    measurement: target.inputs.measurement_test_case,
+    tags,
+    fields
+  }
+}
+
+
+const default_inputs = {
+  url: '',
+  version: 'v1',
+  db: '',
+  username: '',
+  password: '',
+  org: '',
+  bucket: '',
+  token: '',
+  measurement_perf_run: 'PerfRun',
+  measurement_perf_transaction: 'PerfTransaction',
+  measurement_test_run: 'TestRun',
+  measurement_test_suite: 'TestSuite',
+  measurement_test_case: 'TestCase',
+  tags: {},
+  fields: {}
+}
+
+const default_options = {
+  condition: STATUS.PASS_OR_FAIL
+}
+
+module.exports = {
+  run,
+  default_options
+}
+
+/***/ }),
+
+/***/ 1457:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const request = __nccwpck_require__(4873);
+const { getPercentage, truncate, getPrettyDuration } = __nccwpck_require__(7996);
+const extension_manager = __nccwpck_require__(9171);
+const { HOOK, STATUS, TARGET } = __nccwpck_require__(7011);
+const logger = __nccwpck_require__(1180);
+
+const PerformanceTestResult = __nccwpck_require__(9818);
+const { getValidMetrics, getMetricValuesText } = __nccwpck_require__(1940);
+const TestResult = __nccwpck_require__(2658);
+const { getPlatform } = __nccwpck_require__(7051);
+
+
+
+const COLORS = {
+  GOOD: '#36A64F',
+  WARNING: '#ECB22E',
+  DANGER: '#DC143C'
+}
+
+async function run({ result, target }) {
+  setTargetInputs(target);
+  const payload = getMainPayload();
+  if (result instanceof PerformanceTestResult) {
+    await setPerformancePayload({ result, target, payload });
+  } else {
+    await setFunctionalPayload({ result, target, payload });
+  }
+  const message = getRootPayload({ result, target, payload });
+  logger.info(`🔔 Publishing results to Slack...`);
+  return request.post({
+    url: target.inputs.url,
+    body: message
+  });
+}
+
+async function setFunctionalPayload({ result, target, payload }) {
+  await extension_manager.run({ result, target, payload, hook: HOOK.START });
+  setMainBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, hook: HOOK.AFTER_SUMMARY });
+  setSuiteBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, hook: HOOK.END });
+}
+
+function setTargetInputs(target) {
+  target.inputs = Object.assign({}, default_inputs, target.inputs);
+  if (target.inputs.publish === 'test-summary-slim') {
+    target.inputs.include_suites = false;
+  }
+  if (target.inputs.publish === 'failure-details') {
+    target.inputs.include_failure_details = true;
+  }
+}
+
+function getMainPayload() {
+  return {
+    "blocks": []
+  };
+}
+
+function setMainBlock({ result, target, payload }) {
+  let text = `*${getTitleText(result, target)}*\n`;
+  text += `\n*Results*: ${getResultText(result)}`;
+  text += `\n*Duration*: ${getPrettyDuration(result.duration, target.inputs.duration)}`;
+  payload.blocks.push({
+    "type": "section",
+    "text": {
+      "type": "mrkdwn",
+      "text": text
+    }
+  });
+}
+
+function getTitleText(result, target, {allowTitleLink = true} = {}) {
+  let text = target.inputs.title ? target.inputs.title : result.name;
+  if (target.inputs.title_suffix) {
+    text = `${text} ${target.inputs.title_suffix}`;
+  }
+  if (allowTitleLink && target.inputs.title_link) {
+    text = `<${target.inputs.title_link}|${text}>`;
+  }
+  return text;
+}
+
+function getResultText(result) {
+  const percentage = getPercentage(result.passed, result.total);
+  return `${result.passed} / ${result.total} Passed (${percentage}%)`;
+}
+
+function setSuiteBlock({ result, target, payload }) {
+  let suite_attachments_length = 0;
+  if (target.inputs.include_suites) {
+    for (let i = 0; i < result.suites.length && suite_attachments_length < target.inputs.max_suites; i++) {
+      const suite = result.suites[i];
+      if (target.inputs.only_failures && suite.status !== 'FAIL') {
+        continue;
+      }
+      // if suites length eq to 1 then main block will include suite summary
+      if (result.suites.length > 1) {
+        payload.blocks.push(getSuiteSummary({ target, suite }));
+        suite_attachments_length += 1;
+      }
+      if (target.inputs.include_failure_details) {
+        // Only attach failure details block if there were failures
+        if (suite.failed > 0) {
+          payload.blocks.push(getFailureDetails(suite));
+        }
+      }
+    }
+  }
+}
+
+function getSuiteSummary({ target, suite }) {
+  const platform = getPlatform(TARGET.SLACK);
+  const text = platform.getSuiteSummaryText(target, suite);
+  return {
+    "type": "section",
+    "text": {
+      "type": "mrkdwn",
+      "text": text
+    }
+  };
+}
+
+function getFailureDetails(suite) {
+  let text = '';
+  const cases = suite.cases;
+  for (let i = 0; i < cases.length; i++) {
+    const test_case = cases[i];
+    if (test_case.status === 'FAIL') {
+      text += `*Test*: ${test_case.name}\n*Error*: ${truncate(test_case.failure ?? 'N/A', 150)}\n\n`;
+    }
+  }
+  return {
+    "type": "section",
+    "text": {
+      "type": "mrkdwn",
+      "text": text
+    }
+  }
+}
+
+/**
+ *
+ * @param {object} param0
+ * @param {PerformanceTestResult | TestResult} param0.result
+ * @returns
+ */
+function getRootPayload({ result, target, payload }) {
+  let color = COLORS.GOOD;
+  if (result.status !== 'PASS') {
+    let somePassed = true;
+    if (result instanceof PerformanceTestResult) {
+      somePassed = result.transactions.some(suite => suite.status === 'PASS');
+    } else {
+      somePassed = result.suites.some(suite => suite.status === 'PASS');
+    }
+    if (somePassed) {
+      color = COLORS.WARNING;
+    } else {
+      color = COLORS.DANGER;
+    }
+  }
+  return {
+    "attachments": [
+      {
+        "color": color,
+        "blocks": payload.blocks,
+        "fallback": `${getTitleText(result, target, {allowTitleLink: false})}\nResults: ${getResultText(result)}`,
+      }
+    ]
+  };
+}
+
+async function setPerformancePayload({ result, target, payload }) {
+  await extension_manager.run({ result, target, payload, hook: HOOK.START });
+  await setPerformanceMainBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, hook: HOOK.AFTER_SUMMARY });
+  await setTransactionBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, hook: HOOK.END });
+}
+
+/**
+ *
+ * @param {object} param0
+ * @param {PerformanceTestResult} param0.result
+ */
+async function setPerformanceMainBlock({ result, target, payload }) {
+  let text = `*${getTitleText(result, target)}*\n`;
+  result.total = result.transactions.length;
+  result.passed = result.transactions.filter(_transaction => _transaction.status === 'PASS').length;
+  text += `\n*Results*: ${getResultText(result)}`;
+  const valid_metrics = await getValidMetrics({ metrics: result.metrics, target, result });
+  for (let i = 0; i < valid_metrics.length; i++) {
+    const metric = valid_metrics[i];
+    text += `\n*${metric.name}*: ${getMetricValuesText({ metric, target, result })}`;
+  }
+  payload.blocks.push({
+    "type": "section",
+    "text": {
+      "type": "mrkdwn",
+      "text": text
+    }
+  });
+}
+
+/**
+ *
+ * @param {object} param0
+ * @param {PerformanceTestResult} param0.result
+ */
+async function setTransactionBlock({ result, target, payload }) {
+  if (target.inputs.include_suites) {
+    for (let i = 0; i < result.transactions.length; i++) {
+      const transaction = result.transactions[i];
+      if (target.inputs.only_failures && transaction.status !== 'FAIL') {
+        continue;
+      }
+      // if transactions length eq to 1 then main block will include transaction summary
+      if (result.transactions.length > 1) {
+        let text = `*${getTitleText(transaction, target)}*\n`;
+        const valid_metrics = await getValidMetrics({ metrics: transaction.metrics, target, result });
+        for (let i = 0; i < valid_metrics.length; i++) {
+          const metric = valid_metrics[i];
+          text += `\n*${metric.name}*: ${getMetricValuesText({ metric, target, result })}`;
+        }
+        payload.blocks.push({
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": text
+          }
+        });
+      }
+    }
+  }
+}
+
+
+const default_options = {
+  condition: STATUS.PASS_OR_FAIL
+}
+
+const default_inputs = {
+  publish: 'test-summary',
+  include_suites: true,
+  max_suites: 10,
+  only_failures: true,
+  include_failure_details: false,
+  duration: '',
+  metrics: [
+    {
+      "name": "Samples",
+    },
+    {
+      "name": "Duration",
+      "condition": "always",
+      "fields": ["avg", "p95"]
+    }
+  ]
+}
+
+async function handleErrors({ target, errors }) {
+  let title = 'Error: Reporting Test Results';
+  title = target.inputs.title ? title + ' - ' + target.inputs.title : title;
+
+  const blocks = [];
+
+  blocks.push({
+    "type": "section",
+    "text": {
+      "type": "mrkdwn",
+      "text": title
+    }
+  });
+  blocks.push({
+    "type": "section",
+    "text": {
+      "type": "mrkdwn",
+      "text": errors.join('\n\n')
+    }
+  });
+
+  const payload = {
+    "attachments": [
+      {
+        "color": COLORS.DANGER,
+        "blocks": blocks,
+        "fallback": title,
+      }
+    ]
+  };
+
+  return request.post({
+    url: target.inputs.url,
+    body: payload
+  });
+}
+
+module.exports = {
+  run,
+  handleErrors,
+  default_options
+}
+
+
+/***/ }),
+
+/***/ 4547:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const request = __nccwpck_require__(4873);
+const { getPercentage, truncate, getPrettyDuration } = __nccwpck_require__(7996);
+const { getValidMetrics, getMetricValuesText } = __nccwpck_require__(1940);
+const extension_manager = __nccwpck_require__(9171);
+const { HOOK, STATUS, TARGET } = __nccwpck_require__(7011);
+const logger = __nccwpck_require__(1180);
+
+const TestResult = __nccwpck_require__(2658);
+const PerformanceTestResult = __nccwpck_require__(9818);
+const { getPlatform } = __nccwpck_require__(7051);
+
+/**
+ * @param {object} param0
+ * @param {PerformanceTestResult | TestResult} param0.result
+ * @returns
+ */
+async function run({ result, target }) {
+  setTargetInputs(target);
+  const root_payload = getRootPayload();
+  const payload = getMainPayload(target);
+  if (result instanceof PerformanceTestResult) {
+    await setPerformancePayload({ result, target, payload, root_payload });
+  } else {
+    await setFunctionalPayload({ result, target, payload, root_payload });
+  }
+  setRootPayload(root_payload, payload);
+  logger.info(`🔔 Publishing results to Teams...`);
+  return request.post({
+    url: target.inputs.url,
+    body: root_payload
+  });
+}
+
+async function setPerformancePayload({ result, target, payload, root_payload }) {
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.START });
+  setTitleBlock({ result, target, payload });
+  await setMainBlockForPerformance({ result, target, payload });
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.AFTER_SUMMARY });
+  await setTransactionBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.END });
+}
+
+async function setFunctionalPayload({ result, target, payload, root_payload }) {
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.START });
+  setTitleBlock({ result, target, payload });
+  setMainBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.AFTER_SUMMARY });
+  setSuiteBlock({ result, target, payload });
+  await extension_manager.run({ result, target, payload, root_payload, hook: HOOK.END });
+}
+
+function setTargetInputs(target) {
+  target.inputs = Object.assign({}, default_inputs, target.inputs);
+  if (target.inputs.publish === 'test-summary-slim') {
+    target.inputs.include_suites = false;
+  }
+  if (target.inputs.publish === 'failure-details') {
+    target.inputs.include_failure_details = true;
+  }
+}
+
+function getMainPayload(target) {
+  const main = {
+    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+    "type": "AdaptiveCard",
+    "version": "1.0",
+    "body": [],
+    "actions": []
+  };
+  if (target.inputs.width) {
+    if (!main.msteams) {
+      main.msteams = {};
+    }
+    main.msteams.width = target.inputs.width;
+  }
+  return main;
+}
+
+function getTitleText(result, target) {
+  const title = target.inputs.title ? target.inputs.title : result.name;
+  if (target.inputs.title_suffix) {
+    return `${title} ${target.inputs.title_suffix}`;
+  }
+  return `${title}`;
+}
+
+function setTitleBlock({ result, target, payload }) {
+  const title = getTitleText(result, target);
+  const emoji = result.status === 'PASS' ? '✅' : '❌';
+  let text = '';
+  if (target.inputs.include_suites === false) {
+    text = `${emoji} ${title}`;
+  } else if (result.suites && result.suites.length > 1 || result.transactions && result.transactions.length > 1) {
+    text = title;
+  } else {
+    text = `${emoji} ${title}`;
+  }
+  if (target.inputs.title_link) {
+    text = `[${text}](${target.inputs.title_link})`
+  }
+  payload.body.push({
+    "type": "TextBlock",
+    "text": text,
+    "size": "medium",
+    "weight": "bolder",
+    "wrap": true
+  });
+}
+
+function setMainBlock({ result, target, payload }) {
+  const facts = [];
+  const percentage = getPercentage(result.passed, result.total);
+  facts.push({
+    "title": "Results:",
+    "value": `${result.passed} / ${result.total} Passed (${percentage}%)`
+  });
+  facts.push({
+    "title": "Duration:",
+    "value": `${getPrettyDuration(result.duration, target.inputs.duration)}`
+  });
+  payload.body.push({
+    "type": "FactSet",
+    "facts": facts
+  });
+}
+
+function setSuiteBlock({ result, target, payload }) {
+  let suite_attachments_length = 0;
+  if (target.inputs.include_suites) {
+    for (let i = 0; i < result.suites.length && suite_attachments_length < target.inputs.max_suites; i++) {
+      const suite = result.suites[i];
+      if (target.inputs.only_failures && suite.status !== 'FAIL') {
+        continue;
+      }
+      // if suites length eq to 1 then main block will include suite summary
+      if (result.suites.length > 1) {
+        payload.body.push(...getSuiteSummary({ suite, target }));
+        suite_attachments_length += 1;
+      }
+      if (target.inputs.include_failure_details) {
+        payload.body.push(...getFailureDetailsFactSets(suite));
+      }
+    }
+  }
+}
+
+function getSuiteSummary({ suite, target }) {
+
+  const platform = getPlatform(TARGET.TEAMS);
+  const suite_title = platform.getSuiteTitle(suite);
+  const suite_results = platform.getSuiteResults(suite);
+  const duration = platform.getSuiteDuration(target, suite);
+
+  const blocks = [
+    {
+      "type": "TextBlock",
+      "text": suite_title,
+      "isSubtle": true,
+      "weight": "bolder",
+      "wrap": true
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        {
+          "title": "Results:",
+          "value": suite_results
+        },
+        {
+          "title": "Duration:",
+          "value": duration
+        }
+      ]
+    }
+  ];
+
+  const suite_metadata_text = platform.getSuiteMetaDataText(suite);
+  if (suite_metadata_text) {
+    blocks.push({
+      "type": "TextBlock",
+      "text": suite_metadata_text,
+      "wrap": true
+    });
+  }
+
+  return blocks;
+}
+
+function getFailureDetailsFactSets(suite) {
+  const fact_sets = [];
+  const cases = suite.cases;
+  for (let i = 0; i < cases.length; i++) {
+    const test_case = cases[i];
+    if (test_case.status === 'FAIL') {
+      fact_sets.push({
+        "type": "FactSet",
+        "facts": [
+          {
+            "title": "Test:",
+            "value": test_case.name
+          },
+          {
+            "title": "Error:",
+            "value": truncate(test_case.failure ?? 'N/A', 150)
+          }
+        ]
+      });
+    }
+  }
+  return fact_sets;
+}
+
+function getRootPayload() {
+  return {
+    "type": "message",
+    "attachments": [
+      {
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": ''
+      }
+    ]
+  };
+}
+
+function setRootPayload(root_payload, payload) {
+  root_payload.attachments[0].content = payload;
+}
+
+/**
+ * @param {object} param0
+ * @param {PerformanceTestResult} param0.result
+ */
+async function setMainBlockForPerformance({ result, target, payload }) {
+  const total = result.transactions.length;
+  const passed = result.transactions.filter(_transaction => _transaction.status === 'PASS').length;
+  const percentage = getPercentage(passed, total);
+  payload.body.push({
+    "type": "FactSet",
+    "facts": [
+      {
+        "title": "Results:",
+        "value": `${passed} / ${total} Passed (${percentage}%)`
+      }
+    ]
+  });
+  payload.body.push({
+    "type": "FactSet",
+    "facts": await getFactMetrics({ metrics: result.metrics, result, target })
+  });
+}
+
+async function getFactMetrics({ metrics, target, result }) {
+  const facts = [];
+  const valid_metrics = await getValidMetrics({ metrics, target, result });
+  for (let i = 0; i < valid_metrics.length; i++) {
+    const metric = valid_metrics[i];
+    facts.push({
+      "title": `${metric.name}:`,
+      "value": getMetricValuesText({ metrics, metric, target, result })
+    })
+  }
+  return facts;
+}
+
+/**
+ * @param {object} param0
+ * @param {PerformanceTestResult} param0.result
+ */
+async function setTransactionBlock({ result, target, payload }) {
+  if (target.inputs.include_suites) {
+    for (let i = 0; i < result.transactions.length; i++) {
+      const transaction = result.transactions[i];
+      if (target.inputs.only_failures && transaction.status !== 'FAIL') {
+        continue;
+      }
+      // if transactions length eq to 1 then main block will include transaction summary
+      if (result.transactions.length > 1) {
+        const emoji = transaction.status === 'PASS' ? '✅' : '❌';
+        payload.body.push({
+          "type": "TextBlock",
+          "text": `${emoji} ${transaction.name}`,
+          "isSubtle": true,
+          "weight": "bolder",
+          "wrap": true
+        });
+        payload.body.push({
+          "type": "FactSet",
+          "facts": await getFactMetrics({ metrics: transaction.metrics, result, target })
+        });
+      }
+    }
+  }
+}
+
+const default_options = {
+  condition: STATUS.PASS_OR_FAIL
+}
+
+const default_inputs = {
+  publish: 'test-summary',
+  include_suites: true,
+  max_suites: 10,
+  only_failures: true,
+  include_failure_details: false,
+  width: '',
+  duration: '',
+  metrics: [
+    {
+      "name": "Samples",
+    },
+    {
+      "name": "Duration",
+      "condition": "always",
+      "fields": ["avg", "p95"]
+    }
+  ]
+}
+
+async function handleErrors({ target, errors }) {
+  let title = 'Error: Reporting Test Results';
+  title = target.inputs.title ? title + ' - ' + target.inputs.title : title;
+
+  const root_payload = getRootPayload();
+  const payload = getMainPayload(target);
+
+  payload.body.push({
+    "type": "TextBlock",
+    "text": title,
+    "size": "medium",
+    "weight": "bolder",
+    "wrap": true
+  });
+
+  payload.body.push({
+    "type": "TextBlock",
+    "text": errors.join('\n'),
+    "size": "medium",
+    "weight": "bolder",
+    "wrap": true
+  });
+
+  setRootPayload(root_payload, payload);
+
+
+  return request.post({
+    url: target.inputs.url,
+    body: root_payload
+  });
+}
+
+module.exports = {
+  run,
+  handleErrors,
+  default_options
+}
+
+
+/***/ }),
+
+/***/ 5891:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const path = __nccwpck_require__(6928);
+const logger = __nccwpck_require__(1180);
+
+class ConfigBuilder {
+
+  /**
+   * @param {import('../index').CommandLineOptions} opts
+   */
+  constructor(opts) {
+    this.opts = opts;
+  }
+
+  build() {
+    if (!this.opts) {
+      return;
+    }
+    if (typeof this.opts.config === 'object') {
+      return
+    }
+    if (this.opts.config && typeof this.opts.config === 'string') {
+      return;
+    }
+
+    logger.info('🏗 Building config...')
+    this.#buildConfig();
+    this.#buildBeats();
+    this.#buildResults();
+    this.#buildTargets();
+    this.#buildExtensions();
+
+    logger.debug(`🛠️ Generated Config: \n${JSON.stringify(this.config, null, 2)}`);
+
+    this.opts.config = this.config;
+  }
+
+  #buildConfig() {
+    /** @type {import('../index').PublishConfig}  */
+    this.config = {};
+  }
+
+  #buildBeats() {
+    this.config.project = this.opts.project || this.config.project;
+    this.config.run = this.opts.run || this.config.run;
+    this.config.api_key = this.opts['api-key'] || this.config.api_key;
+  }
+
+  #buildResults() {
+    if (this.opts.junit) {
+      this.#addResults('junit', this.opts.junit);
+    }
+    if (this.opts.testng) {
+      this.#addResults('testng', this.opts.testng);
+    }
+    if (this.opts.cucumber) {
+      this.#addResults('cucumber', this.opts.cucumber);
+    }
+    if (this.opts.mocha) {
+      this.#addResults('mocha', this.opts.mocha);
+    }
+    if (this.opts.nunit) {
+      this.#addResults('nunit', this.opts.nunit);
+    }
+    if (this.opts.xunit) {
+      this.#addResults('xunit', this.opts.xunit);
+    }
+    if (this.opts.mstest) {
+      this.#addResults('mstest', this.opts.mstest);
+    }
+  }
+
+  /**
+   * @param {string} type
+   * @param {string} file
+   */
+  #addResults(type, file) {
+    this.config.results = [
+      {
+        type,
+        files: [path.join(file)]
+      }
+    ]
+  }
+
+  #buildTargets() {
+    if (this.opts.slack) {
+      this.#addTarget('slack', this.opts.slack);
+    }
+    if (this.opts.teams) {
+      this.#addTarget('teams', this.opts.teams);
+    }
+    if (this.opts.chat) {
+      this.#addTarget('chat', this.opts.chat);
+    }
+  }
+
+  #addTarget(name, url) {
+    this.config.targets = this.config.targets || [];
+    this.config.targets.push({ name, inputs: { url, title: this.opts.title || '', only_failures: true } })
+  }
+
+  #buildExtensions() {
+    if (this.opts['ci-info']) {
+      this.#addExtension('ci-info');
+    }
+    if (this.opts['chart-test-summary']) {
+      this.#addExtension('quick-chart-test-summary');
+    }
+  }
+
+  #addExtension(name) {
+    this.config.extensions = this.config.extensions || [];
+    this.config.extensions.push({ name });
+  }
+
+}
+
+module.exports = { ConfigBuilder };
+
+/***/ }),
+
+/***/ 1180:
+/***/ ((module) => {
+
+const trm = console;
+
+const LEVEL_VERBOSE = 2;
+const LEVEL_TRACE = 3;
+const LEVEL_DEBUG = 4;
+const LEVEL_INFO = 5;
+const LEVEL_WARN = 6;
+const LEVEL_ERROR = 7;
+const LEVEL_SILENT = 8;
+
+/**
+ * returns log level value
+ * @param {string} level - log level
+ */
+function getLevelValue(level) {
+  const logLevel = level.toUpperCase();
+  switch (logLevel) {
+    case 'TRACE':
+      return LEVEL_TRACE;
+    case 'DEBUG':
+      return LEVEL_DEBUG;
+    case 'INFO':
+      return LEVEL_INFO;
+    case 'WARN':
+      return LEVEL_WARN;
+    case 'ERROR':
+      return LEVEL_ERROR;
+    case 'SILENT':
+      return LEVEL_SILENT;
+    case 'VERBOSE':
+      return LEVEL_VERBOSE;
+    default:
+      return LEVEL_INFO;
+  }
+}
+
+class Logger {
+
+  constructor() {
+    this.level = process.env.TESTBEATS_LOG_LEVEL || 'INFO';
+    this.levelValue = getLevelValue(this.level);
+    if (process.env.TESTBEATS_DISABLE_LOG_COLORS === 'true') {
+      options.disableColors = true;
+    }
+  }
+
+  /**
+   * sets log level
+   * @param {('TRACE'|'DEBUG'|'INFO'|'WARN'|'ERROR')} level - log level
+   */
+  setLevel(level) {
+    this.level = level;
+    this.levelValue = getLevelValue(this.level);
+  }
+
+  trace(...msg) {
+    if (this.levelValue <= LEVEL_TRACE) {
+      msg.forEach(m => trm.debug(m));
+    }
+  }
+
+  debug(...msg) {
+    if (this.levelValue <= LEVEL_DEBUG) {
+      msg.forEach(m => trm.debug(m));
+    }
+  }
+
+  info(...msg) {
+    if (this.levelValue <= LEVEL_INFO) {
+      msg.forEach(m => trm.info(m));
+    }
+  }
+
+  warn(...msg) {
+    if (this.levelValue <= LEVEL_WARN) {
+      msg.forEach(m => trm.warn(getMessage(m)));
+    }
+  }
+
+  error(...msg) {
+    if (this.levelValue <= LEVEL_ERROR) {
+      msg.forEach(m => trm.error(getMessage(m)));
+    }
+  }
+
+}
+
+
+function getMessage(msg) {
+  try {
+    return typeof msg === 'object' ? JSON.stringify(msg, null, 2) : msg;
+  } catch (_) {
+    return msg;
+  }
+}
+
+
+module.exports = new Logger();
+
+/***/ }),
+
+/***/ 339:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+const { join, resolve } = __nccwpck_require__(6928);
+const { readdirSync, statSync } = __nccwpck_require__(9896);
+
+function totalist(dir, callback, pre='') {
+	dir = resolve('.', dir);
+	let arr = readdirSync(dir);
+	let i=0, abs, stats;
+	for (; i < arr.length; i++) {
+		abs = join(dir, arr[i]);
+		stats = statSync(abs);
+		stats.isDirectory()
+			? totalist(abs, callback, join(pre, arr[i]))
+			: callback(join(pre, arr[i]), abs, stats);
+	}
+}
+
+exports.totalist = totalist;
+
+/***/ }),
+
 /***/ 770:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -25654,57 +40821,83 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(7484));
-const wait_1 = __nccwpck_require__(910);
+const testbeats_1 = __importDefault(__nccwpck_require__(2764));
 /**
  * The main function for the action.
  * @returns {Promise<void>} Resolves when the action is complete.
  */
 async function run() {
     try {
-        const ms = core.getInput('milliseconds');
-        // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
-        core.debug(`Waiting ${ms} milliseconds ...`);
-        // Log the current timestamp, wait, then log the new timestamp
-        core.debug(new Date().toTimeString());
-        await (0, wait_1.wait)(parseInt(ms, 10));
-        core.debug(new Date().toTimeString());
-        // Set outputs for other workflow steps to use
-        core.setOutput('time', new Date().toTimeString());
+        // Get and validate inputs
+        const configFile = core.getInput('config', { required: true });
+        // // Read config file
+        // const configContent = fs.readFileSync(inputs.configFile, 'utf8');
+        // const config: PublishConfig = JSON.parse(configContent);
+        // Publish results (let testbeats handle the processing)
+        await testbeats_1.default.publish({ config: configFile });
+        core.info('Successfully published test results');
     }
     catch (error) {
-        // Fail the workflow run if an error occurs
-        if (error instanceof Error)
+        if (error instanceof Error) {
             core.setFailed(error.message);
+        }
+        else {
+            core.setFailed('An unexpected error occurred');
+        }
     }
 }
 
 
 /***/ }),
 
-/***/ 910:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ 6805:
+/***/ ((module) => {
 
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.wait = wait;
-/**
- * Wait for a number of milliseconds.
- * @param milliseconds The number of milliseconds to wait.
- * @returns {Promise<string>} Resolves with 'done!' after the wait is over.
- */
-async function wait(milliseconds) {
-    return new Promise(resolve => {
-        if (isNaN(milliseconds)) {
-            throw new Error('milliseconds not a number');
-        }
-        setTimeout(() => resolve('done!'), milliseconds);
-    });
+function webpackEmptyContext(req) {
+	var e = new Error("Cannot find module '" + req + "'");
+	e.code = 'MODULE_NOT_FOUND';
+	throw e;
 }
+webpackEmptyContext.keys = () => ([]);
+webpackEmptyContext.resolve = webpackEmptyContext;
+webpackEmptyContext.id = 6805;
+module.exports = webpackEmptyContext;
 
+/***/ }),
+
+/***/ 4535:
+/***/ ((module) => {
+
+function webpackEmptyContext(req) {
+	var e = new Error("Cannot find module '" + req + "'");
+	e.code = 'MODULE_NOT_FOUND';
+	throw e;
+}
+webpackEmptyContext.keys = () => ([]);
+webpackEmptyContext.resolve = webpackEmptyContext;
+webpackEmptyContext.id = 4535;
+module.exports = webpackEmptyContext;
+
+/***/ }),
+
+/***/ 1635:
+/***/ ((module) => {
+
+function webpackEmptyContext(req) {
+	var e = new Error("Cannot find module '" + req + "'");
+	e.code = 'MODULE_NOT_FOUND';
+	throw e;
+}
+webpackEmptyContext.keys = () => ([]);
+webpackEmptyContext.resolve = webpackEmptyContext;
+webpackEmptyContext.id = 1635;
+module.exports = webpackEmptyContext;
 
 /***/ }),
 
@@ -25905,6 +41098,14 @@ module.exports = require("timers");
 
 "use strict";
 module.exports = require("tls");
+
+/***/ }),
+
+/***/ 2018:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("tty");
 
 /***/ }),
 
@@ -27571,6 +42772,96 @@ function parseParams (str) {
 module.exports = parseParams
 
 
+/***/ }),
+
+/***/ 180:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Copyright (C) 2017-present by Andrea Giammarchi - @WebReflection
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+const {replace} = '';
+
+// escape
+const es = /&(?:amp|#38|lt|#60|gt|#62|apos|#39|quot|#34);/g;
+const ca = /[&<>'"]/g;
+
+const esca = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  "'": '&#39;',
+  '"': '&quot;'
+};
+const pe = m => esca[m];
+
+/**
+ * Safely escape HTML entities such as `&`, `<`, `>`, `"`, and `'`.
+ * @param {string} es the input to safely escape
+ * @returns {string} the escaped input, and it **throws** an error if
+ *  the input type is unexpected, except for boolean and numbers,
+ *  converted as string.
+ */
+const escape = es => replace.call(es, ca, pe);
+exports.escape = escape;
+
+
+// unescape
+const unes = {
+  '&amp;': '&',
+  '&#38;': '&',
+  '&lt;': '<',
+  '&#60;': '<',
+  '&gt;': '>',
+  '&#62;': '>',
+  '&apos;': "'",
+  '&#39;': "'",
+  '&quot;': '"',
+  '&#34;': '"'
+};
+const cape = m => unes[m];
+
+/**
+ * Safely unescape previously escaped entities such as `&`, `<`, `>`, `"`,
+ * and `'`.
+ * @param {string} un a previously escaped string
+ * @returns {string} the unescaped input, and it **throws** an error if
+ *  the input type is unexpected, except for boolean and numbers,
+ *  converted as string.
+ */
+const unescape = un => replace.call(un, es, cape);
+exports.unescape = unescape;
+
+
+/***/ }),
+
+/***/ 9841:
+/***/ ((module) => {
+
+"use strict";
+module.exports = /*#__PURE__*/JSON.parse('{"name":"testbeats","version":"2.1.6","description":"Publish test results to Microsoft Teams, Google Chat, Slack and InfluxDB","main":"src/index.js","types":"./src/index.d.ts","bin":{"testbeats":"src/cli.js"},"files":["/src"],"scripts":{"test":"c8 mocha test --reporter mocha-multi-reporters --reporter-options configFile=mocha.report.json","build":"pkg --out-path dist ."},"repository":{"type":"git","url":"git+https://github.com/test-results-reporter/testbeats.git"},"keywords":["test","results","publish","report","microsoft teams","teams","slack","influx","influxdb","junit","mocha","cucumber","testng","xunit","reportportal","google chat","chat","percy","jmeter"],"author":"","license":"ISC","bugs":{"url":"https://github.com/test-results-reporter/testbeats/issues"},"homepage":"https://testbeats.com","dependencies":{"async-retry":"^1.3.3","dotenv":"^16.4.5","form-data-lite":"^1.0.3","influxdb-lite":"^1.0.0","performance-results-parser":"latest","phin-retry":"^1.0.3","pretty-ms":"^7.0.1","rosters":"0.0.1","sade":"^1.8.1","test-results-parser":"0.2.5"},"devDependencies":{"c8":"^10.1.2","mocha":"^10.7.3","mocha-junit-reporter":"^2.2.1","mocha-multi-reporters":"^1.5.1","pactum":"^3.7.1","pkg":"^5.8.1"},"engines":{"node":">=14.0.0"},"engineStrict":true}');
+
 /***/ })
 
 /******/ 	});
@@ -27606,6 +42897,11 @@ module.exports = parseParams
 /******/ 	}
 /******/ 	
 /************************************************************************/
+/******/ 	/* webpack/runtime/hasOwnProperty shorthand */
+/******/ 	(() => {
+/******/ 		__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ 	})();
+/******/ 	
 /******/ 	/* webpack/runtime/compat */
 /******/ 	
 /******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";

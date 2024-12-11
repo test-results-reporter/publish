@@ -1,16 +1,16 @@
 {
-  "name": "typescript-action",
-  "description": "GitHub Actions TypeScript template",
-  "version": "0.0.0",
-  "author": "",
+  "name": "publish",
+  "description": "GitHub Action for TestBeats",
+  "version": "0.0.1",
+  "author": "LeelaPrasad V",
   "private": true,
-  "homepage": "https://github.com/actions/typescript-action",
+  "homepage": "https://github.com/test-results-reporter/publish",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actions/typescript-action.git"
+    "url": "git+https://github.com/test-results-reporter/publish.git"
   },
   "bugs": {
-    "url": "https://github.com/actions/typescript-action/issues"
+    "url": "https://github.com/test-results-reporter/publish/issues"
   },
   "keywords": [
     "actions",
@@ -21,7 +21,7 @@
     ".": "./dist/index.js"
   },
   "engines": {
-    "node": ">=21"
+    "node": ">=18"
   },
   "scripts": {
     "bundle": "npm run format:write && npm run package",
@@ -67,7 +67,8 @@
     ]
   },
   "dependencies": {
-    "@actions/core": "^1.11.1"
+    "@actions/core": "^1.11.1",
+    "testbeats": "^2.1.6"
   },
   "devDependencies": {
     "@github/local-action": "^2.2.0",
