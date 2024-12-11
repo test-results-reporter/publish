@@ -1,11 +1,11 @@
-# TestBeats Publish Github Action
+# TestBeats Publish GitHub Action
 
 [![GitHub Super-Linter](https://github.com/test-results-reporter/publish/actions/workflows/linter.yml/badge.svg)](https://github.com/super-linter/super-linter)
 ![CI](https://github.com/test-results-reporter/publish/actions/workflows/ci.yml/badge.svg)
 [![Check dist/](https://github.com/test-results-reporter/publish/actions/workflows/check-dist.yml/badge.svg)](https://github.com/test-results-reporter/publish/actions/workflows/check-dist.yml)
 [![CodeQL](https://github.com/test-results-reporter/publish/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/test-results-reporter/publish/actions/workflows/codeql-analysis.yml)
 
-Github action for testbeats publish command
+GitHub action for testbeats publish command
 
 ## Development Setup
 
