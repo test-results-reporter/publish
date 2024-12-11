@@ -1,5 +1,6 @@
 import * as core from '@actions/core'
 import testbeats from 'testbeats'
+import fs from 'fs/promises'
 
 /**
  * The main function for the action.
@@ -11,10 +12,10 @@ export async function run(): Promise<void> {
     const configFile: string = core.getInput('config', { required: true })
 
     // // Read config file
-    // const configContent = fs.readFileSync(inputs.configFile, 'utf8');
+    const configContent = JSON.parse(await fs.readFile(configFile, 'utf8'))
     // const config: PublishConfig = JSON.parse(configContent);
     // Publish results (let testbeats handle the processing)
-    await testbeats.publish({ config: configFile })
+    await testbeats.publish({ config: configContent })
 
     core.info('Successfully published test results')
   } catch (error) {

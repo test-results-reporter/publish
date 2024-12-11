@@ -40838,6 +40838,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(7484));
 const testbeats_1 = __importDefault(__nccwpck_require__(2764));
+const promises_1 = __importDefault(__nccwpck_require__(1943));
 /**
  * The main function for the action.
  * @returns {Promise<void>} Resolves when the action is complete.
@@ -40847,10 +40848,10 @@ async function run() {
         // Get and validate inputs
         const configFile = core.getInput('config', { required: true });
         // // Read config file
-        // const configContent = fs.readFileSync(inputs.configFile, 'utf8');
+        const configContent = JSON.parse(await promises_1.default.readFile(configFile, 'utf8'));
         // const config: PublishConfig = JSON.parse(configContent);
         // Publish results (let testbeats handle the processing)
-        await testbeats_1.default.publish({ config: configFile });
+        await testbeats_1.default.publish({ config: configContent });
         core.info('Successfully published test results');
     }
     catch (error) {
@@ -40980,6 +40981,14 @@ module.exports = require("events");
 
 "use strict";
 module.exports = require("fs");
+
+/***/ }),
+
+/***/ 1943:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("fs/promises");
 
 /***/ }),
 
