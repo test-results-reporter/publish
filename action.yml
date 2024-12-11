@@ -1,4 +1,4 @@
-name: 'TestBeats Publish Action'
+name: 'TestBeats Publish'
 description:
   'Publish test results to Microsoft Teams, Google Chat, Slack and other
   platforms'
