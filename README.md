@@ -7,7 +7,6 @@
 
 Github action for testbeats publish command
 
-
 ## Development Setup
 
 After you've cloned the repository to your local machine or codespace, you'll
@@ -60,12 +59,11 @@ The [`action.yml`](action.yml) file defines metadata about the action, such as
 input(s) and output(s). For details about this file, see
 [Metadata syntax for GitHub Actions](https://docs.github.com/en/actions/creating-actions/metadata-syntax-for-github-actions).
 
-
 ## Action Usage
 
-Below is an example of Testbeats action in a workflow file. To include the action in a workflow, you can use the
-`uses` syntax with the `@` symbol to reference a specific branch, tag, or commit
-hash.
+Below is an example of Testbeats action in a workflow file. To include the
+action in a workflow, you can use the `uses` syntax with the `@` symbol to
+reference a specific branch, tag, or commit hash.
 
 ```yaml
 steps:

@@ -1,5 +1,7 @@
 name: 'TestBeats Publish Action'
-description: 'Publish test results to Microsoft Teams, Google Chat, Slack and other platforms'
+description:
+  'Publish test results to Microsoft Teams, Google Chat, Slack and other
+  platforms'
 author: 'TestBeats'
 
 branding:
