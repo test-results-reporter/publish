@@ -10,8 +10,74 @@ branding:
 
 inputs:
   config:
-    description: 'Path to Testbeats configuration file'
-    required: true
+    description:
+      'Path to Testbeats configuration file. If provided, other inputs are
+      ignored.'
+    required: false
+  api-key:
+    description: 'TestBeats API key (Required if posting to TestBeats)'
+    required: false
+  project:
+    description: 'Project name (Required if api-key is provided)'
+    required: false
+  run:
+    description: 'Run name (Required if api-key is provided)'
+    required: false
+  slack:
+    description: 'Slack webhook URL'
+    required: false
+  teams:
+    description: 'Microsoft Teams webhook URL'
+    required: false
+  chat:
+    description: 'Google Chat webhook URL'
+    required: false
+  title:
+    description: 'Title of test results notification'
+    required: false
+  junit:
+    description:
+      'JUnit XML path (At least one test report format is required if config
+      file is not provided)'
+    required: false
+  testng:
+    description:
+      'TestNG XML path (At least one test report format is required if config
+      file is not provided)'
+    required: false
+  cucumber:
+    description:
+      'Cucumber JSON path (At least one test report format is required if config
+      file is not provided)'
+    required: false
+  mocha:
+    description:
+      'Mocha JSON path (At least one test report format is required if config
+      file is not provided)'
+    required: false
+  nunit:
+    description:
+      'NUnit XML path (At least one test report format is required if config
+      file is not provided)'
+    required: false
+  xunit:
+    description:
+      'xUnit XML path (At least one test report format is required if config
+      file is not provided)'
+    required: false
+  mstest:
+    description:
+      'MSTest XML path (At least one test report format is required if config
+      file is not provided)'
+    required: false
+  ci-info:
+    description: 'CI info extension'
+    required: false
+    default: 'false'
+  chart-test-summary:
+    description: 'Chart test summary extension'
+    required: false
+    default: 'false'
 
 runs:
   using: 'node20'

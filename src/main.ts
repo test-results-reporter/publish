@@ -1,21 +1,56 @@
 import * as core from '@actions/core'
-import testbeats from 'testbeats'
-import fs from 'fs/promises'
+import { exec } from '@actions/exec'
 
-/**
- * The main function for the action.
- * @returns {Promise<void>} Resolves when the action is complete.
- */
 export async function run(): Promise<void> {
   try {
-    // Get and validate inputs
-    const configFile: string = core.getInput('config', { required: true })
+    // Get config file input
+    const configFile = core.getInput('config')
 
-    // // Read config file
-    const configContent = JSON.parse(await fs.readFile(configFile, 'utf8'))
-    // const config: PublishConfig = JSON.parse(configContent);
-    // Publish results (let testbeats handle the processing)
-    await testbeats.publish({ config: configContent })
+    // Build command arguments array
+    const args: string[] = []
+
+    // Handle config file
+    if (configFile) {
+      args.push('--config', configFile)
+    }
+
+    // Define input keys
+    const inputs = [
+      'api-key',
+      'project',
+      'run',
+      'slack',
+      'teams',
+      'chat',
+      'title',
+      'junit',
+      'testng',
+      'cucumber',
+      'mocha',
+      'nunit',
+      'xunit',
+      'mstest'
+    ] as const
+
+    // Add other inputs if they exist
+    for (const input of inputs) {
+      const value = core.getInput(input)
+      if (value) {
+        args.push(`--${input}`, value)
+      }
+    }
+
+    // Add boolean flags
+    if (core.getBooleanInput('ci-info')) args.push('--ci-info')
+    if (core.getBooleanInput('chart-test-summary'))
+      args.push('--chart-test-summary')
+
+    // Execute testbeats CLI command
+    const exitCode = await exec('npx', ['testbeats', 'publish', ...args])
+
+    if (exitCode !== 0) {
+      throw new Error(`testbeats CLI command failed with exit code ${exitCode}`)
+    }
 
     core.info('Successfully published test results')
   } catch (error) {

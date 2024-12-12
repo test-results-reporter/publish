@@ -101,3 +101,6 @@ __tests__/runner/*
 .idea
 *.code-workspace
 .testbeats.json
+testbeats.json
+
+local-test.yml
