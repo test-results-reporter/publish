@@ -1,7 +1,7 @@
 {
   "name": "publish",
   "description": "GitHub Action for TestBeats",
-  "version": "0.0.5",
+  "version": "1.0.0",
   "author": "LeelaPrasad V",
   "private": true,
   "homepage": "https://github.com/test-results-reporter/publish",

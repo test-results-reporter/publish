@@ -1,6 +1,5 @@
 # TestBeats Publish GitHub Action
 
-[![GitHub Super-Linter](https://github.com/test-results-reporter/publish/actions/workflows/linter.yml/badge.svg)](https://github.com/super-linter/super-linter)
 ![CI](https://github.com/test-results-reporter/publish/actions/workflows/ci.yml/badge.svg)
 [![Check dist/](https://github.com/test-results-reporter/publish/actions/workflows/check-dist.yml/badge.svg)](https://github.com/test-results-reporter/publish/actions/workflows/check-dist.yml)
 [![CodeQL](https://github.com/test-results-reporter/publish/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/test-results-reporter/publish/actions/workflows/codeql-analysis.yml)
@@ -33,7 +32,7 @@ steps:
     run: npm run test
 
   - name: TestBeats Publish
-    uses: test-results-reporter/publish@v0
+    uses: test-results-reporter/publish@v1
     with:
       config: .testbests.json # TestBests configuration file path
 ```
@@ -57,7 +56,7 @@ steps:
     run: npm run test
 
   - name: TestBeats Publish
-    uses: test-results-reporter/publish@v0
+    uses: test-results-reporter/publish@v1
     with:
       slack: ${{ secrets.SLACK_WEBHOOK_URL }}
       mocha: ./test/mocha/results.xml
@@ -84,7 +83,7 @@ steps:
     run: npm run test
 
   - name: TestBeats Publish
-    uses: test-results-reporter/publish@v0
+    uses: test-results-reporter/publish@v1
     with:
       slack: ${{ secrets.SLACK_WEBHOOK_URL }}
       mocha: ./test/mocha/results.xml
