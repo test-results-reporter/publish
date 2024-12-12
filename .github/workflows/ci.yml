@@ -52,7 +52,5 @@ jobs:
           title: 'TestBeats Publish GHA Tests'
           junit: ./reports/junit.xml
           api-key: ${{ secrets.TEST_BEATS_API_KEY }}
-          project: ${{ github.repository }}
-          run: ${{ github.run_id }}
           ci-info: true
           chart-test-summary: true
