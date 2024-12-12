@@ -63,7 +63,6 @@ steps:
       mocha: ./test/mocha/results.xml
       ci-info: true
       chart-test-summary: true
-
 ```
 
 ### Example Workflow using CLI params and testbeats api key
@@ -145,11 +144,11 @@ need to perform some initial setup steps before you can develop your action.
       ✓ should not include empty inputs in arguments
 
    ----------|---------|----------|---------|---------|-------------------
-   File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+   File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
    ----------|---------|----------|---------|---------|-------------------
-   All files |     100 |      100 |     100 |     100 |                   
-   index.ts |     100 |      100 |     100 |     100 |                   
-   main.ts  |     100 |      100 |     100 |     100 |                   
+   All files |     100 |      100 |     100 |     100 |
+   index.ts |     100 |      100 |     100 |     100 |
+   main.ts  |     100 |      100 |     100 |     100 |
    ----------|---------|----------|---------|---------|-------------------
    Test Suites: 2 passed, 2 total
    Tests:       11 passed, 11 total
