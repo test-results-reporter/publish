@@ -34,7 +34,7 @@ steps:
   - name: TestBeats Publish
     uses: test-results-reporter/publish@v1
     with:
-      config: .testbests.json # TestBests configuration file path
+      config: .testbeats.json # TestBeats configuration file path
 ```
 
 #### Example Workflow using CLI params
@@ -88,8 +88,8 @@ steps:
       slack: ${{ secrets.SLACK_WEBHOOK_URL }}
       mocha: ./test/mocha/results.xml
       api-key: ${{ secrets.TESTBEATS_API_KEY }}
-      project: ${{ github.repository }}
-      run: ${{ github.run_id }}
+      project: ${{ github.repository }} # Optional
+      run: ${{ github.branch_name }} # Optional
 ```
 
 ## Development Setup
