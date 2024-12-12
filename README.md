@@ -8,6 +8,92 @@
 
 GitHub Action for testbeats publish command
 
+## Action Usage
+
+Below is an example of Testbeats action in a workflow file. To include the
+action in a workflow, you can use the `uses` syntax with the `@` symbol to
+reference a specific branch, tag, or commit hash.
+
+#### Example Workflow using `config` file
+
+```yaml
+# .github/workflows/testbeats.yml
+# This workflow will publish test results to slack
+steps:
+  - name: Checkout
+    id: checkout
+    uses: actions/checkout@v4
+
+  - name: Install Dependencies
+    id: npm-ci
+    run: npm ci
+
+  - name: Test
+    id: npm-ci-test
+    run: npm run test
+
+  - name: TestBeats Publish
+    uses: test-results-reporter/publish@v0
+    with:
+      config: .testbests.json # TestBests configuration file path
+```
+
+#### Example Workflow using CLI params
+
+```yaml
+# .github/workflows/testbeats.yml
+# This workflow will publish test results to slack including CI info and chart test summary
+steps:
+  - name: Checkout
+    id: checkout
+    uses: actions/checkout@v4
+
+  - name: Install Dependencies
+    id: npm-ci
+    run: npm ci
+
+  - name: Test
+    id: npm-ci-test
+    run: npm run test
+
+  - name: TestBeats Publish
+    uses: test-results-reporter/publish@v0
+    with:
+      slack: ${{ secrets.SLACK_WEBHOOK_URL }}
+      mocha: ./test/mocha/results.xml
+      ci-info: true
+      chart-test-summary: true
+
+```
+
+### Example Workflow using CLI params and testbeats api key
+
+```yaml
+# .github/workflows/testbeats.yml
+# This workflow will publish test results to TestBeats
+steps:
+  - name: Checkout
+    id: checkout
+    uses: actions/checkout@v4
+
+  - name: Install Dependencies
+    id: npm-ci
+    run: npm ci
+
+  - name: Test
+    id: npm-ci-test
+    run: npm run test
+
+  - name: TestBeats Publish
+    uses: test-results-reporter/publish@v0
+    with:
+      slack: ${{ secrets.SLACK_WEBHOOK_URL }}
+      mocha: ./test/mocha/results.xml
+      api-key: ${{ secrets.TESTBEATS_API_KEY }}
+      project: ${{ github.repository }}
+      run: ${{ github.run_id }}
+```
+
 ## Development Setup
 
 After you've cloned the repository to your local machine or codespace, you'll
@@ -30,23 +116,52 @@ need to perform some initial setup steps before you can develop your action.
    npm install
    ```
 
-1. :building_construction: Package the TypeScript for distribution
+2. :building_construction: Package the TypeScript for distribution
 
    ```bash
    npm run bundle
    ```
 
-1. :white_check_mark: Run the tests
+3. :white_check_mark: Run the tests
 
    ```bash
    $ npm test
 
-   PASS  ./index.test.js
-     ✓ throws invalid number (3ms)
-     ✓ wait 500 ms (504ms)
-     ✓ test runs (95ms)
+   PASS  __tests__/index.test.ts
+   index
+      ✓ should call run function when imported (8 ms)
 
-   ...
+   PASS  __tests__/main.test.ts
+   Github Action Run
+      ✓ should execute testbeats CLI command for slack/Junit - only CLI params (2 ms)
+      ✓ should execute testbeats CLI command for slack/testng - only CLI params
+      ✓ should execute testbeats CLI command for teams/cucumber - only CLI params
+      ✓ should execute testbeats CLI command for chat/mocha - only CLI params
+      ✓ should execute testbeats CLI command for slack/mocha - with api key, project, and run (1 ms)
+      ✓ should execute testbeats CLI command for Junit - only config file
+      ✓ should handle CLI command failure
+      ✓ should handle unexpected errors (1 ms)
+      ✓ should handle non-Error objects in catch block
+      ✓ should not include empty inputs in arguments
+
+   ----------|---------|----------|---------|---------|-------------------
+   File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+   ----------|---------|----------|---------|---------|-------------------
+   All files |     100 |      100 |     100 |     100 |                   
+   index.ts |     100 |      100 |     100 |     100 |                   
+   main.ts  |     100 |      100 |     100 |     100 |                   
+   ----------|---------|----------|---------|---------|-------------------
+   Test Suites: 2 passed, 2 total
+   Tests:       11 passed, 11 total
+   Snapshots:   0 total
+   Time:        0.995 s, estimated 2 s
+   Ran all test suites.
+   ```
+
+4. :gear: Run all checks and tests
+
+   ```bash
+   npm run all
    ```
 
 ## Update the Action Metadata
@@ -59,32 +174,6 @@ in the GitHub Actions toolkit.
 The [`action.yml`](action.yml) file defines metadata about the action, such as
 input(s) and output(s). For details about this file, see
 [Metadata syntax for GitHub Actions](https://docs.github.com/en/actions/creating-actions/metadata-syntax-for-github-actions).
-
-## Action Usage
-
-Below is an example of Testbeats action in a workflow file. To include the
-action in a workflow, you can use the `uses` syntax with the `@` symbol to
-reference a specific branch, tag, or commit hash.
-
-```yaml
-steps:
-  - name: Checkout
-    id: checkout
-    uses: actions/checkout@v4
-
-  - name: Install Dependencies
-    id: npm-ci
-    run: npm ci
-
-  - name: Test
-    id: npm-ci-test
-    run: npm run test
-
-  - name: TestBeats Publish
-    uses: test-results-reporter/publish@0.0.1
-    with:
-      config: .testbests.json # TestBests configuration file path
-```
 
 ## Publishing a New Release
 
