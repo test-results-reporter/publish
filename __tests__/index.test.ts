@@ -9,7 +9,7 @@ jest.mock('../src/main', () => ({
   run: jest.fn()
 }))
 
-describe('index', () => {
+describe('Github Action Index', () => {
   it('should call run function when imported', async () => {
     // Import index to trigger the run function
     await import('../src/index')

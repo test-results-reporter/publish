@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  test-typescript:
+  testbeats-ci-test:
     name: TypeScript Tests
     runs-on: ubuntu-latest
 
@@ -44,21 +44,14 @@ jobs:
         id: npm-ci-test
         run: npm run ci-test
 
-  # test-action:
-  #   name: GitHub Actions Test
-  #   runs-on: ubuntu-latest
-
-  #   steps:
-  #     - name: Checkout
-  #       id: checkout
-  #       uses: actions/checkout@v4
-
-  #     - name: Test Local Action
-  #       id: test-action
-  #       uses: ./
-  #       with:
-  #         milliseconds: 2000
-
-  #     - name: Print Output
-  #       id: output
-  #       run: echo "${{ steps.test-action.outputs.time }}"
+      - name: Publish Test Results
+        id: publish-test-results
+        uses: ./
+        with:
+          slack: ${{ secrets.SLACK_MVP_URL }}
+          junit: ./reports/junit.xml
+          api-key: ${{ secrets.TEST_BEATS_API_KEY }}
+          project: ${{ github.repository }}
+          run: ${{ github.run_id }}
+          ci-info: true
+          chart-test-summary: true
