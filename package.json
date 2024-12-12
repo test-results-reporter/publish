@@ -67,10 +67,12 @@
     ],
     "reporters": [
       "default",
-      ["jest-junit", { 
-        "suiteName": "TestBeats Publish GHA Tests",
-        "outputDirectory": "./reports",
-        "outputName": "junit.xml" 
+      [
+        "jest-junit",
+        {
+          "suiteName": "TestBeats Publish GHA Tests",
+          "outputDirectory": "./reports",
+          "outputName": "junit.xml"
         }
       ]
     ]
