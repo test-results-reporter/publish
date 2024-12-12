@@ -102,5 +102,5 @@ __tests__/runner/*
 *.code-workspace
 .testbeats.json
 testbeats.json
-
+reports
 local-test.yml
