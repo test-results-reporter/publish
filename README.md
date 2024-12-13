@@ -11,7 +11,8 @@
 
 [![Stars](https://img.shields.io/github/stars/test-results-reporter/publish?style=social)](https://github.com/test-results-reporter/publish/stargazers)
 
-GitHub Action for [testbeats](https://github.com/test-results-reporter/testbeats) publish command.
+GitHub Action for
+[testbeats](https://github.com/test-results-reporter/testbeats) publish command.
 
 Read more about the project at https://testbeats.com
 
@@ -104,11 +105,16 @@ steps:
 
 ## Support
 
-Like this project! ⭐ Star it on [Github](https://github.com/test-results-reporter/publish/stargazers) and follow on [Twitter](https://twitter.com/testbeatsapp). Your support means a lot to us.
+Like this project! ⭐ Star it on
+[Github](https://github.com/test-results-reporter/publish/stargazers) and follow
+on [Twitter](https://twitter.com/testbeatsapp). Your support means a lot to us.
 
 ## Contributors
 
-If you've ever wanted to contribute to open source, and a great cause, now is your chance! See the [contributing docs](https://github.com/test-results-reporter/publish/blob/master/CONTRIBUTING.md) for more information.
+If you've ever wanted to contribute to open source, and a great cause, now is
+your chance! See the
+[contributing docs](https://github.com/test-results-reporter/publish/blob/master/CONTRIBUTING.md)
+for more information.
 
 Thanks to all the people who contribute.
 
@@ -116,4 +122,3 @@ Thanks to all the people who contribute.
   <img src="https://contrib.rocks/image?repo=test-results-reporter/publish" />
 </a>
 <br />
-
